@@ -2,6 +2,7 @@ import argparse
 import os
 import random
 import time
+import shutil
 
 import torch
 import torch.nn as nn
@@ -36,6 +37,8 @@ def main(args):
     # model = torch.nn.DataParallel(model, device_ids=list(range(args.ngpu)))
     # model = model.cuda()
 
+    best_prec1 = 0
+
     # resume checkpoint
     if args.resume:
         if os.path.isfile(args.resume):
@@ -56,17 +59,14 @@ def main(args):
     cudnn.benchmark = True
 
     # data loading
-    train_dir = os.path.join(args.data, 'train')
-    val_dir = os.path.join(args.data, 'val')
-
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
     train_sampler = None
     train_loader = torch.utils.data.DataLoader(
         datasets.ImageFolder(
-            train_dir,
+            os.path.join(args.data, 'train'),
             transforms.Compose([
-                transforms.RandomResizedCrop((44,44)),
+                transforms.RandomResizedCrop(32),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 normalize,
@@ -81,10 +81,9 @@ def main(args):
 
     val_loader = torch.utils.data.DataLoader(
         datasets.ImageFolder(
-            val_dir,
+            os.path.join(args.data, 'val'),
             transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
+                transforms.Resize(32),
                 transforms.ToTensor(),
                 normalize,
             ])
@@ -100,10 +99,43 @@ def main(args):
         return
 
     # training
-    for epoch in range(args.epochs):
+    for epoch in range(1, args.epochs+1):
         # Sets the learning rate to the initial LR decayed by 10 every 30 epochs
         lr = args.lr * (0.1 ** (epoch // 30))
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr
 
-        train(train_loader, model, optimizer, epoch)
+        train(train_loader, model, criterion, optimizer, epoch)
+
+        prec1 = evaluate(val_loader, model, criterion, epoch)
+
+        # remember best prec@1 and save checkpoint
+        is_best = prec1 > best_prec1
+        best_prec1 = max(prec1, best_prec1)
+        state = {
+            'epoch': epoch,
+            'state_dict': model.state_dict(),
+            'best_prec1': best_prec1,
+            'optimizer' : optimizer.state_dict(),
+        }
+        filename='./checkpoints/%s_checkpoint.pth.tar'%args.prefix
+        torch.save(state, filename)
+        if is_best:
+            shutil.copyfile(filename, './checkpoints/%s_model_best.pth.tar'%args.prefix)
+
+    # test
+    test_loader = torch.utils.data.DataLoader(
+        datasets.ImageFolder(
+            os.path.join(args.data, 'test'),
+            transforms.Compose([
+                transforms.Resize(32),
+                transforms.ToTensor(),
+                normalize,
+            ])
+        ),
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.workers,
+        pin_memory=True
+    )
+    evaluate()
