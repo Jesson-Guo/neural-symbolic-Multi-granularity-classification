@@ -1,6 +1,5 @@
 import os
 from shutil import copy2, rmtree
-from os import rmdir
 
 target_folder = './tiny-imagenet-200/val/'
 
@@ -17,7 +16,7 @@ with open('./tiny-imagenet-200/val/val_annotations.txt', 'r') as f:
         # move(target_folder + split_line[1] + '/images/' + split_line[0], file)
         if split_line[1] not in val_dict.keys():
             val_dict[split_line[1]] = []
-        val_dict[split_line[1]].append(split_line[0]+'\t'+box+'\n')
+        val_dict[split_line[1]].append(split_line[0]+'\t'+box)
 
 for k in val_dict.keys():
     dir = target_folder + os.sep + k
@@ -26,3 +25,4 @@ for k in val_dict.keys():
         f.write(box)
 
 rmtree('./tiny-imagenet-200/val/images')
+os.remove('./tiny-imagenet-200/val/val_annotations.txt')
