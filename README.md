@@ -1,1 +1,1 @@
-# neural-symbolic-Multi-granularity-classification
+# neural symbolic Multi-granularity classification
