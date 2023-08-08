@@ -3,13 +3,15 @@ import time
 import torch
 
 
-def train(dataloader, model, criterion, optimizer, epoch):
+def train(dataloader, model, criterion, optimizer, status):
+    accuracy, losses, epoch = status
+
     # switch to train mode
     model.train()
 
     for i, (x, label) in enumerate(dataloader):
         start = time.time()
-        label = label.cuda()
+        # label = label.cuda()
         x = torch.autograd.Variable(x)
         label = torch.autograd.Variable(label)
 
@@ -35,4 +37,3 @@ def train(dataloader, model, criterion, optimizer, epoch):
                 Time: {end-start}\t \
                 Loss: {loss}\t \
                 prec@1: {prec1}\t')
-

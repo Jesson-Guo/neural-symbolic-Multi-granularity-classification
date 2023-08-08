@@ -3,14 +3,16 @@ import time
 import torch
 
 
-def evaluate(dataloader, model, criterion, epoch):
+def evaluate(dataloader, model, criterion, status):
+    accuracy, losses, epoch = status
+
     model.eval()
 
     best_prec = 0
 
     for i, (x, label) in enumerate(dataloader):
         start = time.time()
-        label = label.cuda()
+        # label = label.cuda()
         x = torch.autograd.Variable(x)
         label = torch.autograd.Variable(label)
 
