@@ -2,38 +2,41 @@ import time
 
 import torch
 
+from src.utils import *
 
-def train(dataloader, model, criterion, optimizer, status):
+
+def train(dataloader, model, optimizer, status):
     accuracy, losses, epoch = status
 
     # switch to train mode
     model.train()
 
-    for i, (x, label) in enumerate(dataloader):
+    for i, (images, labels, boxes) in enumerate(dataloader):
         start = time.time()
         # label = label.cuda()
-        x = torch.autograd.Variable(x)
-        label = torch.autograd.Variable(label)
+        # x = torch.autograd.Variable(x)
+        # boxes = torch.autograd.Variable(target['boxes'])
+        x = list(image for image in images)
+        targets = []
+        for i in range(boxes.shape[0]):
+            targets.append({'boxes': boxes[i].reshape(1,4), 'labels': labels[i].reshape(1)})
 
-        score = model(x)
-        loss = criterion(score, label)
+        loss_dict = model(x, targets)
+        losses = sum(loss for loss in loss_dict.values())
 
         # record best acc and loss
-        _, pred = score.topk(1, 1, True, True)
-        pred = pred.t()
-        correct = pred.eq(label.view(1, -1).expand_as(pred))
-        prec1 = correct[:1].view(-1).float().sum(0, keepdim=True)
-        prec1 = prec1.mul_(100.0 / label.size(0))
+        # acc = compute_acc(score.data.cpu(), boxes.data.cpu(), x.data.cpu())
+        # accuracy.update(acc, x.shape[0])
+        # losses.update(loss.data[0], x.shape[0])
 
         optimizer.zero_grad()
-        loss.backward()
+        losses.backward()
         optimizer.step()
 
         end = time.time()
 
-        if i % 10 == 0:
-            print(f'\
-                Epoch: [{epoch}][{i}/{len(dataloader)}]\t \
-                Time: {end-start}\t \
-                Loss: {loss}\t \
-                prec@1: {prec1}\t')
+        # if i % 10 == 0:
+        #     print(f'\
+        #         Epoch: [{epoch}][{i}/{len(dataloader)}]\t \
+        #         Time: {end-start}\t \
+        #         Loss: {loss}\t')
