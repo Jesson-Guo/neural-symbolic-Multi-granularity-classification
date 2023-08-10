@@ -8,9 +8,6 @@ from src.utils import *
 def train(dataloader, model, optimizer, status):
     accuracy, losses, epoch = status
 
-    # switch to train mode
-    model.train()
-
     for i, (images, labels, boxes) in enumerate(dataloader):
         start = time.time()
         # label = label.cuda()
@@ -22,7 +19,8 @@ def train(dataloader, model, optimizer, status):
             targets.append({'boxes': boxes[i].reshape(1,4), 'labels': labels[i].reshape(1)})
 
         loss_dict = model(x, targets)
-        losses = sum(loss for loss in loss_dict.values())
+        # we only consider the box regression loss
+        losses = loss_dict['loss_box_reg']
 
         # record best acc and loss
         # acc = compute_acc(score.data.cpu(), boxes.data.cpu(), x.data.cpu())
