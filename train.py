@@ -44,7 +44,7 @@ def train(dataloader, model, optimizer, status, device):
         losses.backward()
         optimizer.step()
 
-        bar.update(i*len(x))
+        bar.update(i)
 
     end = time.time()
 
