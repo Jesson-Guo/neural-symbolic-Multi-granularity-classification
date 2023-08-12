@@ -9,13 +9,12 @@ import torch.utils.data
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
-import torchvision.datasets as datasets
+from torch.utils.data.distributed import DistributedSampler
 from torchvision.models.detection import FasterRCNN
 from torchvision.models.detection.backbone_utils import _resnet_fpn_extractor
 
 from src.resnet import *
 from src.dataset import TinyImagenetDataset
-from src.loss import CIoULoss
 from train import *
 from evaluate import *
 
@@ -25,10 +24,18 @@ def main(args):
     # torch.cuda.manual_seed(args.seed)
     random.seed(args.seed)
 
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # if args.local_rank != -1:
+    #     torch.cuda.set_device(args.local_rank)
+    #     device = torch.device("cuda", args.local_rank)
+    #     torch.distributed.init_process_group(backend="nccl", init_method='env://')
+
+    # device = torch.device("cpu")
+
     # model = resnet18(args.use_cbam)
-    backbone = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=200, use_cbam=args.use_cbam)
+    backbone = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=200+1, use_cbam=args.use_cbam)
     backbone = _resnet_fpn_extractor(backbone, trainable_layers=5)
-    model = FasterRCNN(backbone=backbone, num_classes=200+1)
+    model = FasterRCNN(backbone=backbone, num_classes=200+1, min_size=64, max_size=64)
 
     # define loss function
     # criterion = nn.SmoothL1Loss().cuda()
@@ -40,8 +47,20 @@ def main(args):
         weight_decay=args.weight_decay
     )
     scheduler = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
-    # model = torch.nn.DataParallel(model, device_ids=list(range(args.ngpu)))
-    # model = model.cuda()
+
+    model.to(device)
+    if args.ngpu > 1:
+        # model = nn.DataParallel(model, device_ids=list(range(args.ngpu)))
+        # RuntimeError: Expected to have finished reduction in the prior iteration before starting a new one.
+        # This error indicates that your module has parameters that were not used in producing loss. 
+        # You can enable unused parameter detection by passing the keyword argument `find_unused_parameters=True` to `torch.nn.parallel.DistributedDataParallel`, 
+        # and by making sure all `forward` function outputs participate in calculating loss.
+        model = nn.parallel.DistributedDataParallel(
+            model,
+            device_ids=[args.local_rank],
+            output_device=args.local_rank,
+            # find_unused_parameters=True
+        )
 
     # 程序在开始时花费一点额外时间，为整个网络的每个卷积层搜索最适合它的卷积实现算法，进而实现网络的加速。
     # 适用场景是网络结构固定（不是动态变化的），网络的输入形状（包括 batch size，图片大小，输入的通道）是不变的
@@ -50,33 +69,42 @@ def main(args):
     # data loading
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
+    train_dataset = TinyImagenetDataset(
+        os.path.join(args.data, 'train'),
+        transforms.Compose([
+            # transforms.RandomResizedCrop(32),
+            # transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            normalize,
+        ])
+    )
     train_sampler = None
+    if args.ngpu > 1:
+        train_sampler = DistributedSampler(train_dataset)
+    print(train_sampler)
     train_loader = torch.utils.data.DataLoader(
-        TinyImagenetDataset(
-            os.path.join(args.data, 'train'),
-            transforms.Compose([
-                # transforms.RandomResizedCrop(32),
-                # transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                normalize,
-            ])
-        ),
+        train_dataset,
+        sampler=train_sampler,
         batch_size=args.batch_size,
         shuffle=(train_sampler is None),
         num_workers=args.workers,
-        pin_memory=True,
-        sampler=train_sampler
+        pin_memory=True
     )
 
+    val_dataset = TinyImagenetDataset(
+        os.path.join(args.data, 'val'),
+        transforms.Compose([
+            # transforms.Resize(32),
+            transforms.ToTensor(),
+            normalize,
+        ])
+    )
+    val_sampler = None
+    if args.ngpu > 1:
+        val_sampler = DistributedSampler(train_dataset)
     val_loader = torch.utils.data.DataLoader(
-        TinyImagenetDataset(
-            os.path.join(args.data, 'val'),
-            transforms.Compose([
-                # transforms.Resize(32),
-                transforms.ToTensor(),
-                normalize,
-            ])
-        ),
+        val_dataset,
+        sampler=val_sampler,
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.workers,
@@ -84,33 +112,33 @@ def main(args):
     )
     # evaluate once
     if 1:
-        model.eval()
-        evaluate(val_loader, model)
+        # model.eval()
+        evaluate(val_loader, model, device)
         return
 
     best_acc = 0
-    best_model_state = dict()
 
     # training
     model.train()
 
     for epoch in range(1, args.epochs+1):
-        accuracy = AverageMeter()
         losses = AverageMeter()
+
+        train_sampler.set_epoch(epoch)
+        train(train_loader, model, optimizer, (losses, epoch), device)
 
         # Sets the learning rate to the initial LR decayed by 10 every 30 epochs
         scheduler.step()
 
-        train(train_loader, model, optimizer, (accuracy, losses, epoch))
-
         if epoch % args.eval == 0:
-            acc = evaluate(val_loader, model)
+            val_sampler.set_epoch(epoch)
+            acc = evaluate(val_loader, model, device)
             # remember best model and save checkpoint
             is_best = acc > best_acc
             best_acc = max(acc, best_acc)
             state = {
                 'epoch': epoch,
-                'model': model.state_dict(),
+                'model': model.module.state_dict(),
                 'best_acc': best_acc,
                 'optimizer' : optimizer.state_dict(),
                 'scheduler': scheduler.state_dict()
@@ -120,31 +148,13 @@ def main(args):
             if is_best:
                 shutil.copyfile(filename, './checkpoints/%s_model_best.pth.tar'%args.prefix)
 
-    # test
-    test_loader = torch.utils.data.DataLoader(
-        datasets.ImageFolder(
-            os.path.join(args.data, 'test'),
-            transforms.Compose([
-                transforms.Resize(32),
-                transforms.ToTensor(),
-                normalize,
-            ])
-        ),
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.workers,
-        pin_memory=True
-    )
-
-    # test
-    model.eval()
-    evaluate()
+    print("***** TRAINING OVER *****")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tiny imagenet training')
     parser.add_argument('--seed', type=int, default=72, help='random seed')
-    parser.add_argument('--epoch', type=int, default=50, help='number of epochs to train')
+    parser.add_argument('--epochs', type=int, default=50, help='number of epochs to train')
     parser.add_argument('--use_cbam', type=bool, default=True, help='use cbam or not')
     parser.add_argument('--lr', type=float, default=0.1, help='initial learning rate')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
@@ -155,6 +165,7 @@ if __name__ == "__main__":
     parser.add_argument('--prefix', type=str, default='test', help='prefix for logging & checkpoint saving')
     parser.add_argument('--ngpu', type=int, default=8, help='numbers of gpu to use')
     parser.add_argument('--eval', type=int, default=5, help='numbers of epochs to eval model during training')
+    parser.add_argument("--local_rank", default=os.getenv('LOCAL_RANK', -1), type=int)
 
     args = parser.parse_args()
     main(args)

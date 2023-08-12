@@ -1,40 +1,54 @@
 import time
+import progressbar
 
 import torch
 
 from src.utils import *
 
 
-def train(dataloader, model, optimizer, status):
-    accuracy, losses, epoch = status
+def train(dataloader, model, optimizer, status, device):
+    his, epoch = status
 
+    start = time.time()
+    bar = progressbar.ProgressBar(0, len(dataloader))
+
+    # for i, (images, labels, boxes) in progressbar.progressbar(enumerate(dataloader)):
     for i, (images, labels, boxes) in enumerate(dataloader):
-        start = time.time()
         # label = label.cuda()
         # x = torch.autograd.Variable(x)
         # boxes = torch.autograd.Variable(target['boxes'])
-        x = list(image for image in images)
+        x = list(image.to(device) for image in images)
         targets = []
-        for i in range(boxes.shape[0]):
-            targets.append({'boxes': boxes[i].reshape(1,4), 'labels': labels[i].reshape(1)})
+        for j in range(boxes.shape[0]):
+            targets.append({
+                'boxes': boxes[j].reshape(1,4).to(device),
+                'labels': labels[j].reshape(1).to(device)
+            })
 
         loss_dict = model(x, targets)
         # we only consider the box regression loss
-        losses = loss_dict['loss_box_reg']
+        losses = sum(loss for loss in loss_dict.values())
+        # loss_classifier = loss_dict['loss_classifier']
+        # loss_box_reg = loss_dict['loss_box_reg']
+        # loss_objectness = loss_dict['loss_objectness']
+        # loss_rpn_box_reg = loss_dict['loss_rpn_box_reg']
+
+        # loss_classifier.detach()
+
+        # losses = loss_box_reg + loss_rpn_box_reg + loss_objectness
 
         # record best acc and loss
-        # acc = compute_acc(score.data.cpu(), boxes.data.cpu(), x.data.cpu())
-        # accuracy.update(acc, x.shape[0])
-        # losses.update(loss.data[0], x.shape[0])
+        his.update(losses.data, len(x))
 
         optimizer.zero_grad()
         losses.backward()
         optimizer.step()
 
-        end = time.time()
+        bar.update(i*len(x))
 
-        # if i % 10 == 0:
-        #     print(f'\
-        #         Epoch: [{epoch}][{i}/{len(dataloader)}]\t \
-        #         Time: {end-start}\t \
-        #         Loss: {loss}\t')
+    end = time.time()
+
+    print(f'\
+        Epoch: [{epoch}][{i+1}/{len(dataloader)}]\t \
+        Time: {end-start}\t \
+        Loss: {his.avg}\t')
