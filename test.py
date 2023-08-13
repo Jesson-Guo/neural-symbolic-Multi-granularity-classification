@@ -18,13 +18,15 @@ from src.resnet import *
 
 
 def visualize_box(img, bbox):
-    x_min, y_min, x_max, y_max = bbox
-    cv2.rectangle(img, (x_min, y_min), (x_max, y_max), color=(255,0,0))
+    for i in range(bbox.shape[0]):
+        x_min, y_min, x_max, y_max = bbox[i].numpy().reshape((4))
+        cv2.rectangle(img, (x_min, y_min), (x_max, y_max), color=(0,255,0))
     return img
 
 
+@torch.no_grad()
 def test(model, optimizer, scheduler, ckpt_path, test_path, batch, device):
-    test_path = os.path.join(test_path, 'test/images')
+    test_path = os.path.join(test_path, 'test')
 
     # load checkpoint
     if os.path.isfile(ckpt_path):
@@ -66,25 +68,41 @@ def test(model, optimizer, scheduler, ckpt_path, test_path, batch, device):
     model.eval()
     predictions = []
 
-    for i in range(len(test_images)):
+    # for i in range(len(test_images)):
+    for i in range(2):
         pred = model(test_images[i])
         predictions.append(pred)
         bar.update(i)
+    
+    predictions = partition(predictions, batch)
 
     print("=====> START SAVING OUTPUTS")
     bar = progressbar.ProgressBar(0, num_test_file)
+
+    if not os.path.exists('./output/test/images'):
+        os.makedirs('./output/test/images')
+
+    f = open(os.path.join("./output/test", 'test_boxes.txt'), 'w')
 
     for i in range(len(predictions)):
         # visualize
         for j in range(batch):
             image = cv2.imread(test_files[i][j])
-            bbox = predictions[i][j]['boxes'].detach().numpy().reshape((4))
+            # 会输出多个box
+            bbox = predictions[i][j]['boxes']
             image = visualize_box(image, bbox)
             # plt.imshow()
             # plt.show()
             file_name = test_files[i][j].split('\n')
             file_name = file_name[0].split('/')[-1]
-            plt.savefig(os.path.join("./output/test", file_name))
+            cv2.imwrite(os.path.join("./output/test/images", file_name), image)
+
+            boxes_text = f"{bbox.shape[0]}: "
+            for i in range(bbox.shape[0]):
+                x_min, y_min, x_max, y_max = bbox[i].numpy().reshape((4))
+                boxes_text += f"[{x_min},{y_min},{x_max},{y_max}], "
+            f.write(boxes_text)
+
             bar.update(i*batch + j)
 
     print("===== END TEST =====")
@@ -92,26 +110,35 @@ def test(model, optimizer, scheduler, ckpt_path, test_path, batch, device):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tiny imagenet training')
+    parser.add_argument('--epochs', type=int, default=50, help='number of epochs to train')
+    parser.add_argument('--use_cbam', type=bool, default=True, help='use cbam or not')
+    parser.add_argument('--data', type=str, default='.', help='dataset path')
+    parser.add_argument('--batch_size', type=int, default=32, help='batch size')
+    parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
+    parser.add_argument('--prefix', type=str, default='test', help='prefix for logging & checkpoint saving')
+    parser.add_argument('--ngpu', type=int, default=8, help='numbers of gpu to use')
+
     parser.add_argument('--ckpt_path', type=str, default='.', help='checkpoint path')
-    parser.add_argument('--test_path', type=str, default='.', help='test directory path')
+    parser.add_argument('--test_path', type=str, default='./tiny-imagenet-200', help='test directory path')
     parser.add_argument('--test_batch', type=int, default=100, help='number of images to test per batch')
 
     args = parser.parse_args()
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
     # if args.local_rank != -1:
     #     torch.cuda.set_device(args.local_rank)
     #     device = torch.device("cuda", args.local_rank)
     #     torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
-    backbone = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=200+1, use_cbam=args.use_cbam)
+    backbone = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=200+1, use_cbam=True)
     backbone = _resnet_fpn_extractor(backbone, trainable_layers=5)
     model = FasterRCNN(backbone=backbone, num_classes=200+1, min_size=64, max_size=64)
 
     optimizer = torch.optim.Adam(
         model.parameters(),
-        lr=args.lr,
-        weight_decay=args.weight_decay
+        lr=0.1,
+        weight_decay=1e-4
     )
     scheduler = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 
