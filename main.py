@@ -2,6 +2,7 @@ import argparse
 import os
 import random
 import shutil
+import copy
 
 import torch
 import torch.nn as nn
@@ -11,7 +12,9 @@ import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
 from torch.utils.data.distributed import DistributedSampler
 from torchvision.models.detection import FasterRCNN
+from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection.backbone_utils import _resnet_fpn_extractor
+from torchvision.ops import MultiScaleRoIAlign, misc
 
 from src.resnet import *
 from src.dataset import TinyImagenetDataset
@@ -25,17 +28,50 @@ def main(args):
     random.seed(args.seed)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    # if args.local_rank != -1:
-    #     torch.cuda.set_device(args.local_rank)
-    #     device = torch.device("cuda", args.local_rank)
-    #     torch.distributed.init_process_group(backend="nccl", init_method='env://')
+    if args.local_rank != -1:
+        torch.cuda.set_device(args.local_rank)
+        device = torch.device("cuda", args.local_rank)
+        torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
     # device = torch.device("cpu")
 
-    # model = resnet18(args.use_cbam)
-    backbone = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=200+1, use_cbam=args.use_cbam)
-    backbone = _resnet_fpn_extractor(backbone, trainable_layers=5)
-    model = FasterRCNN(backbone=backbone, num_classes=200+1, min_size=64, max_size=64)
+    # returned layers和anchor_sizes的大小需要相互对应
+    num_classes = 200 + 1
+    norm_layer = misc.FrozenBatchNorm2d
+    trainable_layers = 5
+    returned_layers = [1, 2, 3, 4]
+    anchor_sizes = ((4,), (8,), (16,), (32,), (64,))
+    aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
+
+    backbone = ResNet(
+        Bottleneck,
+        [3, 4, 6, 3],
+        num_classes=num_classes,
+        norm_layer=norm_layer,
+        use_cbam=args.use_cbam
+    )
+    backbone = _resnet_fpn_extractor(
+        backbone,
+        trainable_layers=trainable_layers,
+        returned_layers=returned_layers
+    )
+
+    anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
+    roi_pooler = MultiScaleRoIAlign(
+        featmap_names=["0", "1", "2", "3"],
+        output_size=7,
+        sampling_ratio=2,
+        canonical_scale=64
+    )
+
+    model = FasterRCNN(
+        backbone,
+        num_classes=num_classes,
+        rpn_anchor_generator=anchor_generator,
+        box_roi_pool=roi_pooler,
+        min_size=64,
+        max_size=64
+    )
 
     # define loss function
     # criterion = nn.SmoothL1Loss().cuda()
@@ -138,15 +174,15 @@ def main(args):
             best_acc = max(acc, best_acc)
             state = {
                 'epoch': epoch,
-                'model': model.module.state_dict(),
+                'model': copy.deepcopy(model.module.state_dict()),
                 'best_acc': best_acc,
                 'optimizer' : optimizer.state_dict(),
                 'scheduler': scheduler.state_dict()
             }
-            filename='./checkpoints/%s_checkpoint.pth.tar'%args.prefix
+            filename='./checkpoints/%s_checkpoint.pth'%args.prefix
             torch.save(state, filename)
             if is_best:
-                shutil.copyfile(filename, './checkpoints/%s_model_best.pth.tar'%args.prefix)
+                shutil.copyfile(filename, './checkpoints/%s_model_best.pth'%args.prefix)
 
     print("***** TRAINING OVER *****")
 

@@ -20,27 +20,18 @@ from src.resnet import *
 def visualize_box(img, bbox):
     for i in range(bbox.shape[0]):
         x_min, y_min, x_max, y_max = bbox[i].numpy().reshape((4))
-        cv2.rectangle(img, (x_min, y_min), (x_max, y_max), color=(0,255,0))
+        cv2.rectangle(img, (int(x_min), int(y_min)), (int(x_max), int(y_max)), color=(0,255,0))
     return img
 
 
 @torch.no_grad()
-def test(model, optimizer, scheduler, ckpt_path, test_path, batch, device):
+def test(model, test_path, batch, device):
     test_path = os.path.join(test_path, 'test')
-
-    # load checkpoint
-    if os.path.isfile(ckpt_path):
-        checkpoint = torch.load(ckpt_path)
-        best_acc = checkpoint['best_acc']
-        model.load_state_dict(checkpoint['model'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        scheduler.load_state_dict(checkpoint['scheduler'])
-    else:
-        print("=> no checkpoint found at '{}'".format(ckpt_path))
 
     # load test images
     transform = transforms.Compose([
-        transforms.ToTensor()
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
     test_path = os.path.join(test_path, 'images')
@@ -69,12 +60,10 @@ def test(model, optimizer, scheduler, ckpt_path, test_path, batch, device):
     predictions = []
 
     # for i in range(len(test_images)):
-    for i in range(2):
+    for i in range(5):
         pred = model(test_images[i])
         predictions.append(pred)
         bar.update(i)
-    
-    predictions = partition(predictions, batch)
 
     print("=====> START SAVING OUTPUTS")
     bar = progressbar.ProgressBar(0, num_test_file)
@@ -91,8 +80,8 @@ def test(model, optimizer, scheduler, ckpt_path, test_path, batch, device):
             # 会输出多个box
             bbox = predictions[i][j]['boxes']
             image = visualize_box(image, bbox)
-            # plt.imshow()
-            # plt.show()
+            plt.imshow(image)
+            plt.show()
             file_name = test_files[i][j].split('\n')
             file_name = file_name[0].split('/')[-1]
             cv2.imwrite(os.path.join("./output/test/images", file_name), image)
@@ -101,7 +90,7 @@ def test(model, optimizer, scheduler, ckpt_path, test_path, batch, device):
             for i in range(bbox.shape[0]):
                 x_min, y_min, x_max, y_max = bbox[i].numpy().reshape((4))
                 boxes_text += f"[{x_min},{y_min},{x_max},{y_max}], "
-            f.write(boxes_text)
+            f.write(boxes_text+'\n')
 
             bar.update(i*batch + j)
 
@@ -118,9 +107,9 @@ if __name__ == "__main__":
     parser.add_argument('--prefix', type=str, default='test', help='prefix for logging & checkpoint saving')
     parser.add_argument('--ngpu', type=int, default=8, help='numbers of gpu to use')
 
-    parser.add_argument('--ckpt_path', type=str, default='.', help='checkpoint path')
+    parser.add_argument('--ckpt_path', type=str, default='./checkpoints/RESNET50_FPN_TINY_IMAGENET_best.pt', help='checkpoint path')
     parser.add_argument('--test_path', type=str, default='./tiny-imagenet-200', help='test directory path')
-    parser.add_argument('--test_batch', type=int, default=100, help='number of images to test per batch')
+    parser.add_argument('--test_batch', type=int, default=10, help='number of images to test per batch')
 
     args = parser.parse_args()
 
@@ -135,15 +124,23 @@ if __name__ == "__main__":
     backbone = _resnet_fpn_extractor(backbone, trainable_layers=5)
     model = FasterRCNN(backbone=backbone, num_classes=200+1, min_size=64, max_size=64)
 
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=0.1,
-        weight_decay=1e-4
-    )
-    scheduler = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+    model.eval()
+    x = [torch.rand(3, 300, 400), torch.rand(3, 500, 400)]
+    predictions = model(x)
+
+    # load checkpoint
+    if os.path.isfile(args.ckpt_path):
+        checkpoint = torch.load(args.ckpt_path, map_location=device)
+        model.load_state_dict(checkpoint['model'])
+    else:
+        print("=> no checkpoint found at '{}'".format(args.ckpt_path))
 
     model.to(device)
 
     cudnn.benchmark = True
 
-    test(model, optimizer, scheduler, args.ckpt_path, args.test_path, args.test_batch, device)
+    x = [torch.rand(3, 300, 400), torch.rand(3, 500, 400)]
+    # 经过relu函数x=0
+    predictions = model(x)
+
+    test(model, args.test_path, args.test_batch, device)
