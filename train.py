@@ -4,44 +4,32 @@ import progressbar
 import torch
 
 from src.utils import *
+from engine.symbolic_engine import *
 
 
-def train(dataloader, model, optimizer, status, device):
+def train_one_epoch(dataloader, model, inference, optimizer, status, device):
+    model.train()
+    inference.train()
     his, epoch = status
 
     start = time.time()
     bar = progressbar.ProgressBar(0, len(dataloader))
 
     # for i, (images, labels, boxes) in progressbar.progressbar(enumerate(dataloader)):
-    for i, (images, labels, boxes) in enumerate(dataloader):
+    for i, (x, targets) in enumerate(dataloader):
         # label = label.cuda()
-        # x = torch.autograd.Variable(x)
-        # boxes = torch.autograd.Variable(target['boxes'])
-        x = list(image.to(device) for image in images)
-        targets = []
-        for j in range(boxes.shape[0]):
-            targets.append({
-                'boxes': boxes[j].reshape(1,4).to(device),
-                'labels': labels[j].reshape(1).to(device)
-            })
+        x = torch.autograd.Variable(x)
+        x.to(device)
 
-        loss_dict = model(x, targets)
-        # we only consider the box regression loss
-        losses = sum(loss for loss in loss_dict.values())
-        # loss_classifier = loss_dict['loss_classifier']
-        # loss_box_reg = loss_dict['loss_box_reg']
-        # loss_objectness = loss_dict['loss_objectness']
-        # loss_rpn_box_reg = loss_dict['loss_rpn_box_reg']
+        labels = torch.autograd.Variable(targets['labels'])
+        labels.to(device)
 
-        # loss_classifier.detach()
-
-        # losses = loss_box_reg + loss_rpn_box_reg + loss_objectness
-
-        # record best acc and loss
-        his.update(losses.data, len(x))
+        feat = model(x)
+        feat_list = [feat['0'], feat['1'], feat['2'], feat['3']]
+        loss = inference(feat_list, targets['labels'])
 
         optimizer.zero_grad()
-        losses.backward()
+        loss.backward()
         optimizer.step()
 
         bar.update(i)

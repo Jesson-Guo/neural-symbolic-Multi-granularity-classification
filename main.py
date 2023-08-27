@@ -5,19 +5,24 @@ import shutil
 import copy
 
 import torch
+import torchvision
 import torch.nn as nn
 import torch.utils.data
 import torch.optim.lr_scheduler as lr_scheduler
 import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
 from torch.utils.data.distributed import DistributedSampler
-from torchvision.models.detection import FasterRCNN
+# from torchvision.models.resnet import resnet50
+from torchvision.models.detection import FasterRCNN, fasterrcnn_resnet50_fpn
 from torchvision.models.detection.rpn import AnchorGenerator
 from torchvision.models.detection.backbone_utils import _resnet_fpn_extractor
 from torchvision.ops import MultiScaleRoIAlign, misc
 
+# from src.resnet import *
 from src.resnet import *
 from src.dataset import TinyImagenetDataset
+from src.hierarchy import *
+from engine.symbolic_engine import *
 from train import *
 from evaluate import *
 
@@ -36,45 +41,50 @@ def main(args):
     # device = torch.device("cpu")
 
     # returned layers和anchor_sizes的大小需要相互对应
-    num_classes = 200 + 1
-    norm_layer = misc.FrozenBatchNorm2d
+    num_classes = 200
     trainable_layers = 5
     returned_layers = [1, 2, 3, 4]
-    anchor_sizes = ((4,), (8,), (16,), (32,), (64,))
-    aspect_ratios = ((0.5, 1.0, 2.0),) * len(anchor_sizes)
 
-    backbone = ResNet(
-        Bottleneck,
-        [3, 4, 6, 3],
-        num_classes=num_classes,
-        norm_layer=norm_layer,
-        use_cbam=args.use_cbam
-    )
-    backbone = _resnet_fpn_extractor(
-        backbone,
-        trainable_layers=trainable_layers,
-        returned_layers=returned_layers
-    )
+    # backbone = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=num_classes, use_cbam=args.use_cbam)
+    # fpn = _resnet_fpn_extractor(backbone, trainable_layers, returned_layers)
+    backbone = ResNetFPN(Bottleneck, [3, 4, 6, 3], num_classes=num_classes, use_cbam=args.use_cbam)
+    model = FeatureNet(backbone, in_planes=256)
 
-    anchor_generator = AnchorGenerator(anchor_sizes, aspect_ratios)
-    roi_pooler = MultiScaleRoIAlign(
-        featmap_names=["0", "1", "2", "3"],
-        output_size=7,
-        sampling_ratio=2,
-        canonical_scale=64
-    )
+    # define symbolic inference module
+    wnid_path = open(os.path.join(args.data, 'wnids.txt'), 'r')
+    wnids = ''.join(wnid_path.readlines()).split()
 
-    model = FasterRCNN(
-        backbone,
-        num_classes=num_classes,
-        rpn_anchor_generator=anchor_generator,
-        box_roi_pool=roi_pooler,
-        min_size=64,
-        max_size=64
-    )
+    tree, dic = get_full_hierarchy(args.hier)
+    pruning_count(tree, wnids)
+    pruning(tree)
 
-    # define loss function
-    # criterion = nn.SmoothL1Loss().cuda()
+    lpaths = {}
+    label2id = {}
+    index = 1
+    for wnid in wnids:
+        label2id[wnid] = index
+        index += 1
+        node = dic[wnid]
+        lpaths[label2id[wnid]] = []
+        while node.parent != None:
+            node = node.parent
+            if node.id not in label2id.keys():
+                label2id[node.id] = index
+                index += 1
+            lpaths[label2id[wnid]].append(label2id[node.id])
+
+    f_info = open(args.info, 'rb')
+    info = pickle.load(f_info)
+    f_info.close()
+
+    miu = {}
+    sigma = {}
+    for k in info.keys():
+        miu[k] = info[k]['mean']
+        sigma[k] = info[k]['std']
+
+    inference = SymbolicInference(tree, miu, sigma, lpaths)
+    # model = NSMG(backbone, inference)
 
     # define optimizer
     optimizer = torch.optim.Adam(
@@ -107,6 +117,8 @@ def main(args):
 
     train_dataset = TinyImagenetDataset(
         os.path.join(args.data, 'train'),
+        64,
+        label2id,
         transforms.Compose([
             # transforms.RandomResizedCrop(32),
             # transforms.RandomHorizontalFlip(),
@@ -129,6 +141,8 @@ def main(args):
 
     val_dataset = TinyImagenetDataset(
         os.path.join(args.data, 'val'),
+        64,
+        label2id,
         transforms.Compose([
             # transforms.Resize(32),
             transforms.ToTensor(),
@@ -147,28 +161,27 @@ def main(args):
         pin_memory=True
     )
     # evaluate once
-    if 1:
-        # model.eval()
-        evaluate(val_loader, model, device)
-        return
+    # if 1:
+    #     # model.eval()
+    #     evaluate(val_loader, model, device)
+    #     return
 
     best_acc = 0
 
     # training
-    model.train()
-
     for epoch in range(1, args.epochs+1):
         losses = AverageMeter()
 
-        train_sampler.set_epoch(epoch)
-        train(train_loader, model, optimizer, (losses, epoch), device)
+        if train_sampler != None:
+            train_sampler.set_epoch(epoch)
+        train_one_epoch(train_loader, model, inference, optimizer, (losses, epoch), device)
 
         # Sets the learning rate to the initial LR decayed by 10 every 30 epochs
         scheduler.step()
 
         if epoch % args.eval == 0:
             val_sampler.set_epoch(epoch)
-            acc = evaluate(val_loader, model, device)
+            acc = evaluate(val_loader, model, device, lpaths, label2id, args.conf)
             # remember best model and save checkpoint
             is_best = acc > best_acc
             best_acc = max(acc, best_acc)
@@ -179,10 +192,10 @@ def main(args):
                 'optimizer' : optimizer.state_dict(),
                 'scheduler': scheduler.state_dict()
             }
-            filename='./checkpoints/%s_checkpoint.pth'%args.prefix
+            filename='./checkpoints/%s_checkpoint.pt'%args.prefix
             torch.save(state, filename)
             if is_best:
-                shutil.copyfile(filename, './checkpoints/%s_model_best.pth'%args.prefix)
+                shutil.copyfile(filename, './checkpoints/%s_model_best.pt'%args.prefix)
 
     print("***** TRAINING OVER *****")
 
@@ -201,7 +214,11 @@ if __name__ == "__main__":
     parser.add_argument('--prefix', type=str, default='test', help='prefix for logging & checkpoint saving')
     parser.add_argument('--ngpu', type=int, default=8, help='numbers of gpu to use')
     parser.add_argument('--eval', type=int, default=5, help='numbers of epochs to eval model during training')
-    parser.add_argument("--local_rank", default=os.getenv('LOCAL_RANK', -1), type=int)
+    parser.add_argument('--local_rank', default=os.getenv('LOCAL_RANK', -1), type=int)
+    parser.add_argument('--wnids', type=str, default='', help='wnids file path')
+    parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
+    parser.add_argument('--info', type=str, default='./images_info.pkl', help='images info path')
+    parser.add_argument('--conf', type=float, default=0.4, help='confidence to accept the predicted label')
 
     args = parser.parse_args()
     main(args)
