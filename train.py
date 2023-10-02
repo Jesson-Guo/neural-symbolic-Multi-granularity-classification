@@ -19,14 +19,16 @@ def train_one_epoch(dataloader, model, inference, optimizer, status, device):
     for i, (x, targets) in enumerate(dataloader):
         # label = label.cuda()
         x = torch.autograd.Variable(x)
-        x.to(device)
+        x = x.to(device)
 
         labels = torch.autograd.Variable(targets['labels'])
-        labels.to(device)
+        labels = labels.to(device)
 
         feat = model(x)
         feat_list = [feat['0'], feat['1'], feat['2'], feat['3']]
-        loss = inference(feat_list, targets['labels'])
+        loss = inference.infer(feat_list, targets['labels'], device)
+
+        his.update(loss.item(), x.shape[0])
 
         optimizer.zero_grad()
         loss.backward()

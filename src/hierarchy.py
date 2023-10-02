@@ -3,19 +3,25 @@ import cv2
 import os
 import numpy as np
 import copy
+import pickle
 
 
 class Node(object):
-    def __init__(self, id, parent=None):
-        self.id = id
+    def __init__(self, wnid, name, parent=None):
+        self.id = wnid
+        self.name = name
         self.parent = parent
         self.children = {}
         self.nchild = 0 # num of children
         self.ncount= 0 # num of ImageNet1K children
+        self.weight = None
 
     def update_child(self, node):
         self.children[self.nchild] = node
         self.nchild += 1
+
+    def set_weight(self, weight):
+        self.weight = weight
 
     def is_leaf(self):
         if len(self.children) == 0:
@@ -65,7 +71,7 @@ def get_full_hierarchy(file):
     root = tree.getroot()
 
     synset = root[1]
-    dic = {'fall11':Node('fall11')}
+    dic = {'fall11':Node('fall11', 'Thing')}
     tree = dic['fall11']
 
     queue = [synset]
@@ -76,7 +82,8 @@ def get_full_hierarchy(file):
         for c in node:
             queue.append(c)
             wnid = c.attrib['wnid']
-            dic[wnid] = Node(wnid, cur_tree)
+            words = c.attrib['words']
+            dic[wnid] = Node(wnid, words, cur_tree)
             cur_tree.update_child(dic[wnid])
 
     return dic['fall11'], dic
@@ -98,9 +105,8 @@ def get_hierarchy(hier_path, wnids):
     return tree, labels
 
 
-def image_info():
+def image_info(folder, dic, wnids):
     info = {}
-    folder = './tiny-imagenet-200/train/'
     for d in os.listdir(folder):
         if d[0] != '.':
             f = os.path.join(os.path.join(folder, d), d+'_boxes.txt')
@@ -114,21 +120,7 @@ def image_info():
                 info[d]['mean'] += x.mean()
                 info[d]['std'] += x.std()
                 info[d]['num'] += 1
-    # for d in info.keys():
-    #     info[d]['mean'] /= info[d]['num']
-    #     info[d]['std'] /= info[d]['num']
-    return info
 
-
-if __name__ == "__main__":
-    hier_path = './structure_released.xml'
-    wnid_path = './wnid.txt'
-    wnid = open(wnid_path, 'r')
-    wnids = ''.join(wnid.readlines()).split()
-
-    tree, dic = get_full_hierarchy(hier_path)
-    pruning_count(tree, wnids)
-    pruning(tree)
     labels = {}
     for wnid in wnids:
         node = dic[wnid]
@@ -136,7 +128,7 @@ if __name__ == "__main__":
         while node.parent != None:
             node = node.parent
             labels[wnid].append(node.id)
-    info = image_info()
+
     info_copy = copy.deepcopy(info)
     for k in info.keys():
         ancestors = labels[k]
@@ -146,7 +138,27 @@ if __name__ == "__main__":
             info_copy[anc]['mean'] += info[k]['mean']
             info_copy[anc]['std'] += info[k]['std']
             info_copy[anc]['num'] += info[k]['num']
+    return info_copy
+
+
+if __name__ == "__main__":
+    hier_path = './structure_released.xml'
+    wnid_path = './wnid.txt'
+    folder = './tiny-imagenet-200/train/'
+
+    wnid = open(wnid_path, 'r')
+    wnids = ''.join(wnid.readlines()).split()
+
+    tree, dic = get_full_hierarchy(hier_path)
+    pruning_count(tree, wnids)
+    pruning(tree)
+
+    info = image_info(folder, dic, wnids)
+
+    f = open("./images_info.pkl", 'wb')
     for k in info.keys():
-        info_copy[k]['mean'] /= info_copy[k]['num']
-        info_copy[k]['std'] /= info_copy[k]['num']
+        info[k]['mean'] /= info[k]['num']
+        info[k]['std'] /= info[k]['num']
+    pickle.dump(info, f)
+    f.close()
     print()

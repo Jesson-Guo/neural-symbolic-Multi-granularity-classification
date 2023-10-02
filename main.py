@@ -51,8 +51,8 @@ def main(args):
     model = FeatureNet(backbone, in_planes=256)
 
     # define symbolic inference module
-    wnid_path = open(os.path.join(args.data, 'wnids.txt'), 'r')
-    wnids = ''.join(wnid_path.readlines()).split()
+    wnids = open(os.path.join(args.data, 'wnids.txt'), 'r')
+    wnids = ''.join(wnids.readlines()).split()
 
     tree, dic = get_full_hierarchy(args.hier)
     pruning_count(tree, wnids)
@@ -83,7 +83,7 @@ def main(args):
         miu[k] = info[k]['mean']
         sigma[k] = info[k]['std']
 
-    inference = SymbolicInference(tree, miu, sigma, lpaths)
+    inference = SymbolicInference(tree, miu, sigma, lpaths, label2id)
     # model = NSMG(backbone, inference)
 
     # define optimizer
@@ -162,9 +162,7 @@ def main(args):
     )
     # evaluate once
     # if 1:
-    #     # model.eval()
-    #     evaluate(val_loader, model, device)
-    #     return
+    #     evaluate(val_loader, model, inference, lpaths, args.conf, device)
 
     best_acc = 0
 
@@ -180,18 +178,22 @@ def main(args):
         scheduler.step()
 
         if epoch % args.eval == 0:
-            val_sampler.set_epoch(epoch)
-            acc = evaluate(val_loader, model, device, lpaths, label2id, args.conf)
+            if val_sampler != None:
+                val_sampler.set_epoch(epoch)
+            acc = evaluate(val_loader, model, inference, lpaths, args.conf, device)
             # remember best model and save checkpoint
             is_best = acc > best_acc
             best_acc = max(acc, best_acc)
             state = {
                 'epoch': epoch,
-                'model': copy.deepcopy(model.module.state_dict()),
                 'best_acc': best_acc,
                 'optimizer' : optimizer.state_dict(),
                 'scheduler': scheduler.state_dict()
             }
+            if args.ngpu > 1:
+                state['model'] = model.module.state_dict()
+            else:
+                state['model'] = model.state_dict()
             filename='./checkpoints/%s_checkpoint.pt'%args.prefix
             torch.save(state, filename)
             if is_best:
