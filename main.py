@@ -38,18 +38,6 @@ def main(args):
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
-    # device = torch.device("cpu")
-
-    # returned layers和anchor_sizes的大小需要相互对应
-    num_classes = 200
-    trainable_layers = 5
-    returned_layers = [1, 2, 3, 4]
-
-    # backbone = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=num_classes, use_cbam=args.use_cbam)
-    # fpn = _resnet_fpn_extractor(backbone, trainable_layers, returned_layers)
-    backbone = ResNetFPN(Bottleneck, [3, 4, 6, 3], num_classes=num_classes, use_cbam=args.use_cbam)
-    model = FeatureNet(backbone, in_planes=256)
-
     # define symbolic inference module
     wnids = open(os.path.join(args.data, 'wnids.txt'), 'r')
     wnids = ''.join(wnids.readlines()).split()
@@ -58,33 +46,21 @@ def main(args):
     pruning_count(tree, wnids)
     pruning(tree)
 
-    lpaths = {}
     label2id = {}
-    index = 1
+    index = 0
     for wnid in wnids:
         label2id[wnid] = index
         index += 1
+    for wnid in wnids:
         node = dic[wnid]
-        lpaths[label2id[wnid]] = []
         while node.parent != None:
             node = node.parent
             if node.id not in label2id.keys():
                 label2id[node.id] = index
                 index += 1
-            lpaths[label2id[wnid]].append(label2id[node.id])
 
-    f_info = open(args.info, 'rb')
-    info = pickle.load(f_info)
-    f_info.close()
-
-    miu = {}
-    sigma = {}
-    for k in info.keys():
-        miu[k] = info[k]['mean']
-        sigma[k] = info[k]['std']
-
-    inference = SymbolicInference(tree, miu, sigma, lpaths, label2id)
-    # model = NSMG(backbone, inference)
+    # use resnet18
+    model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=200, use_cbam=args.use_cbam)
 
     # define optimizer
     optimizer = torch.optim.Adam(
@@ -93,6 +69,8 @@ def main(args):
         weight_decay=args.weight_decay
     )
     scheduler = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+
+    criterion = nn.CrossEntropyLoss()
 
     model.to(device)
     if args.ngpu > 1:
@@ -172,7 +150,7 @@ def main(args):
 
         if train_sampler != None:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(train_loader, model, inference, optimizer, (losses, epoch), device)
+        train_one_epoch(train_loader, model, optimizer, criterion, (losses, epoch), device)
 
         # Sets the learning rate to the initial LR decayed by 10 every 30 epochs
         scheduler.step()
@@ -180,7 +158,10 @@ def main(args):
         if epoch % args.eval == 0:
             if val_sampler != None:
                 val_sampler.set_epoch(epoch)
-            acc = evaluate(val_loader, model, inference, lpaths, args.conf, device)
+            acc = evaluate(val_loader, model, criterion, device)
+            print(f'\
+                Epoch: [{epoch}][{args.epochs+1}]\t \
+                acc: {acc}\t')
             # remember best model and save checkpoint
             is_best = acc > best_acc
             best_acc = max(acc, best_acc)

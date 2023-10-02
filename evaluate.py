@@ -6,10 +6,9 @@ from src.utils import *
 
 
 @torch.no_grad()
-def evaluate(dataloader, model, inference, lpaths, conf, device):
+def evaluate(dataloader, model, criterion, device):
     model.eval()
-    inference.eval()
-    accuracy = AverageMeter()
+    acc = 0
     bar = progressbar.ProgressBar(0, len(dataloader))
 
     # for images, labels, boxes in dataloader:
@@ -19,20 +18,13 @@ def evaluate(dataloader, model, inference, lpaths, conf, device):
         labels = targets['labels']
         labels = labels.to(device)
 
-        feat = model(x)
-        feat_list = [feat['0'], feat['1'], feat['2'], feat['3']]
-        out = inference.infer(feat_list, device=device)
-
-        for k in range(len(out)):
-            infer_path, diffs = out[k]
-            gt_path = copy.deepcopy(lpaths[labels[k].item()])
-            gt_path.reverse()
-            for j in range(min(len(gt_path), len(infer_path))):
-                if infer_path[j] != gt_path[j] or diffs[j] < conf:
-                    break
-            accuracy.update(j/(len(gt_path)-1.0))
-            del gt_path
+        out = model(x)
+        _, pred = torch.max(out.data, 1)
+        # loss = criterion(out, labels)
+        acc += torch.sum(pred == labels)
 
         bar.update(i)
 
-    return accuracy.avg
+    acc = acc / len(dataloader.dataset)
+
+    return acc
