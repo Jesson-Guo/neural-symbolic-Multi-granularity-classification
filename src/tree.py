@@ -2,7 +2,7 @@ import torch
 import os
 import numpy as np
 
-from sklearn.cluster import AgglomerativeClustering
+import torch.nn as nn
 
 
 MODEL_FC_KEYS = (
@@ -43,27 +43,42 @@ def get_weights_from_checkpoint(checkpoint):
     return fc
 
 
-def build(node, weights):
-    if node.is_leaf():
-        # TODO 确定weights中向量与label之间的对应关系
-        node.set_weight()
-        return node.weight
-    
-    # 根据聚类方法更新父节点weights
-    weight = 0
-    for i in node.children.keys():
-        weight += build(node.children[i], weights)
-    weight /= node.nchild
-    node.set_weight(weight)
-    return weight
+# 决策树非叶节点用一个全连接层 或者 计算内积
+class InferTree(nn.Module):
+    def __init__(self, root, label2id) -> None:
+        super().__init__()
+        self.root = root
+        self.label2id = label2id
 
+    def build_tree(self, node, checkpoint):
+        def build(node, weights):
+            if node.is_leaf():
+                # TODO Resnet最后fc层的参数列向量对应一个权重leaf[0].weight = fc[:,0]
+                index = self.label2id[node.id]
+                node.set_weight(weights[:,index])
+                return node.weight
 
-def build_tree(
-    node,
-    checkpoint,
+            # 根据聚类方法更新父节点weights
+            weight = 0
+            for i in node.children.keys():
+                weight += build(node.children[i], weights)
+            weight /= node.nchild
+            node.set_weight(weight)
+            return weight
 
-):
-    weights = get_weights_from_checkpoint(checkpoint)
-    build(node, weights)
-    return node
+        weights = get_weights_from_checkpoint(checkpoint)
+        build(node, weights)
+        return node
 
+    def infer(self, x):
+        # 计算子节点weight与x的内积
+        out = []
+        node = self.root
+        while not node.is_leaf():
+            temp = []
+            for k in node.children.keys():
+                v = torch.dot(x, node.children[k].weight)
+                temp.append(v.data)
+            i = np.argmax(np.array(temp))
+            out.append((node[i].id, node[i].name))
+        return out
