@@ -50,7 +50,7 @@ class InferTree(nn.Module):
         self.root = root
         self.label2id = label2id
 
-    def build_tree(self, node, checkpoint):
+    def build_tree(self, checkpoint):
         def build(node, weights):
             if node.is_leaf():
                 # TODO Resnet最后fc层的参数列向量对应一个权重leaf[0].weight = fc[:,0]
@@ -66,6 +66,7 @@ class InferTree(nn.Module):
             node.set_weight(weight)
             return weight
 
+        node = self.root
         weights = get_weights_from_checkpoint(checkpoint)
         build(node, weights)
         return node
@@ -80,5 +81,5 @@ class InferTree(nn.Module):
                 v = torch.dot(x, node.children[k].weight)
                 temp.append(v.data)
             i = np.argmax(np.array(temp))
-            out.append((node[i].id, node[i].name))
+            out.append((temp[i], node[i].id, node[i].name))
         return out

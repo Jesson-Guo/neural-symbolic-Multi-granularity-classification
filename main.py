@@ -22,6 +22,7 @@ from torchvision.ops import MultiScaleRoIAlign, misc
 from src.resnet import *
 from src.dataset import TinyImagenetDataset
 from src.hierarchy import *
+from src.tree import InferTree
 from engine.symbolic_engine import *
 from train import *
 from evaluate import *
@@ -58,6 +59,8 @@ def main(args):
             if node.id not in label2id.keys():
                 label2id[node.id] = index
                 index += 1
+    
+    infer_tree = InferTree(tree, label2id)
 
     # use resnet18
     model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=200, use_cbam=args.use_cbam)
@@ -150,7 +153,7 @@ def main(args):
 
         if train_sampler != None:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(train_loader, model, optimizer, criterion, (losses, epoch), device)
+        train_one_epoch(train_loader, model, infer_tree, optimizer, criterion, (losses, epoch), device)
 
         # Sets the learning rate to the initial LR decayed by 10 every 30 epochs
         scheduler.step()
@@ -188,7 +191,7 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=72, help='random seed')
     parser.add_argument('--epochs', type=int, default=50, help='number of epochs to train')
     parser.add_argument('--use_cbam', type=bool, default=True, help='use cbam or not')
-    parser.add_argument('--lr', type=float, default=0.1, help='initial learning rate')
+    parser.add_argument('--lr', type=float, default=1e-4, help='initial learning rate')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
     parser.add_argument('--weight-decay', type=float, default=1e-4, help='weight-decay')
     parser.add_argument('--data', type=str, default='.', help='dataset path')
@@ -196,7 +199,7 @@ if __name__ == "__main__":
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--prefix', type=str, default='test', help='prefix for logging & checkpoint saving')
     parser.add_argument('--ngpu', type=int, default=8, help='numbers of gpu to use')
-    parser.add_argument('--eval', type=int, default=5, help='numbers of epochs to eval model during training')
+    parser.add_argument('--eval', type=int, default=1, help='numbers of epochs to eval model during training')
     parser.add_argument('--local_rank', default=os.getenv('LOCAL_RANK', -1), type=int)
     parser.add_argument('--wnids', type=str, default='', help='wnids file path')
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')

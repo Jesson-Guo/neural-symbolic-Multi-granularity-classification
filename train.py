@@ -7,7 +7,7 @@ from src.utils import *
 from engine.symbolic_engine import *
 
 
-def train_one_epoch(dataloader, model, optimizer, criterion, status, device):
+def train_one_epoch(dataloader, model, infer_tree, optimizer, criterion, status, device):
     model.train()
     his, epoch = status
 
@@ -23,7 +23,11 @@ def train_one_epoch(dataloader, model, optimizer, criterion, status, device):
         labels = labels.to(device)
 
         out = model(x)
-        loss = criterion(out, labels)
+        # inference
+        out = infer_tree.infer(out)
+        loss = 0
+        for i in range(len(out)):
+            loss += criterion(out[0], labels[i])
 
         his.update(loss.item(), x.shape[0])
 
