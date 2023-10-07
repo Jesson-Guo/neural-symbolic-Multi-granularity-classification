@@ -285,9 +285,9 @@ class ResNet(nn.Module):
         x = self.avgpool(x)
         # F.avg_pool2d(x, 4)
         x = torch.flatten(x, 1)
-        x = self.fc(x)
+        out = self.fc(x)
 
-        return x
+        return out, x
 
 
 def resnet18(use_cbam) -> ResNet:
