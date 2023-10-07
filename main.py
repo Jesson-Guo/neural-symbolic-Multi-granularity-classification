@@ -33,7 +33,8 @@ def main(args):
     # torch.cuda.manual_seed(args.seed)
     random.seed(args.seed)
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
+    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if args.local_rank != -1:
         torch.cuda.set_device(args.local_rank)
         device = torch.device("cuda", args.local_rank)
@@ -47,6 +48,7 @@ def main(args):
     pruning_count(tree, wnids)
     pruning(tree)
 
+    lpaths = {}
     label2id = {}
     index = 0
     for wnid in wnids:
@@ -54,13 +56,13 @@ def main(args):
         index += 1
     for wnid in wnids:
         node = dic[wnid]
+        lpaths[label2id[wnid]] = []
         while node.parent != None:
             node = node.parent
             if node.id not in label2id.keys():
                 label2id[node.id] = index
                 index += 1
-    
-    infer_tree = InferTree(tree, label2id)
+            lpaths[label2id[wnid]].append(label2id[node.id])
 
     # use resnet18
     model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=200, use_cbam=args.use_cbam)
@@ -88,6 +90,9 @@ def main(args):
             output_device=args.local_rank,
             # find_unused_parameters=True
         )
+
+    infer_tree = InferTree(tree, label2id, device, nn.MSELoss())
+    infer_tree.build_tree(args.ckpt)
 
     # 程序在开始时花费一点额外时间，为整个网络的每个卷积层搜索最适合它的卷积实现算法，进而实现网络的加速。
     # 适用场景是网络结构固定（不是动态变化的），网络的输入形状（包括 batch size，图片大小，输入的通道）是不变的
@@ -153,7 +158,7 @@ def main(args):
 
         if train_sampler != None:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(train_loader, model, infer_tree, optimizer, criterion, (losses, epoch), device)
+        train_one_epoch(train_loader, model, infer_tree, optimizer, criterion, lpaths, (losses, epoch), device)
 
         # Sets the learning rate to the initial LR decayed by 10 every 30 epochs
         scheduler.step()
@@ -161,7 +166,7 @@ def main(args):
         if epoch % args.eval == 0:
             if val_sampler != None:
                 val_sampler.set_epoch(epoch)
-            acc = evaluate(val_loader, model, criterion, device)
+            acc = evaluate(val_loader, model, infer_tree, device)
             print(f'\
                 Epoch: [{epoch}][{args.epochs+1}]\t \
                 acc: {acc}\t')
@@ -205,6 +210,7 @@ if __name__ == "__main__":
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
     parser.add_argument('--info', type=str, default='./images_info.pkl', help='images info path')
     parser.add_argument('--conf', type=float, default=0.4, help='confidence to accept the predicted label')
+    parser.add_argument('--ckpt', type=str, default='./checkpoints', help='ckpt file')
 
     args = parser.parse_args()
     main(args)
