@@ -33,36 +33,12 @@ def main(args):
     # torch.cuda.manual_seed(args.seed)
     random.seed(args.seed)
 
-    device = torch.device("cpu")
-    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if args.local_rank != -1:
         torch.cuda.set_device(args.local_rank)
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
-
-    # define symbolic inference module
-    wnids = open(os.path.join(args.data, 'wnids.txt'), 'r')
-    wnids = ''.join(wnids.readlines()).split()
-
-    tree, dic = get_full_hierarchy(args.hier)
-    pruning_count(tree, wnids)
-    pruning(tree)
-
-    lpaths = {}
-    label2id = {}
-    index = 0
-    for wnid in wnids:
-        label2id[wnid] = index
-        index += 1
-    for wnid in wnids:
-        node = dic[wnid]
-        lpaths[label2id[wnid]] = []
-        while node.parent != None:
-            node = node.parent
-            if node.id not in label2id.keys():
-                label2id[node.id] = index
-                index += 1
-            lpaths[label2id[wnid]].append(label2id[node.id])
 
     # use resnet18
     model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=200, use_cbam=args.use_cbam)
@@ -91,8 +67,41 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    infer_tree = InferTree(tree, label2id, device, nn.MSELoss())
-    infer_tree.build_tree(args.ckpt)
+    # define inference module
+    wnids = open(os.path.join(args.data, 'wnids.txt'), 'r')
+    wnids = ''.join(wnids.readlines()).split()
+
+    tree, dic = get_full_hierarchy(args.hier)
+    pruning_count(tree, wnids)
+    pruning(tree)
+
+    lpaths = {}
+    label2id = {}
+    index = 0
+    for wnid in wnids:
+        label2id[wnid] = index
+        index += 1
+    for wnid in wnids:
+        node = dic[wnid]
+        while node.parent != None:
+            node = node.parent
+            if node.id not in label2id.keys():
+                label2id[node.id] = index
+                index += 1
+
+    infer_tree = InferTree(tree, label2id, criterion, device)
+    # infer_tree.format_tree()
+    infer_tree.build_tree()
+
+    for wnid in wnids:
+        node = dic[wnid]
+        # while not node.is_leaf():
+        #     node = node.children[0]
+        lpaths[label2id[wnid]] = []
+        while node.parent != None:
+            node = node.parent
+            lpaths[label2id[wnid]].append(label2id[node.id])
+
 
     # 程序在开始时花费一点额外时间，为整个网络的每个卷积层搜索最适合它的卷积实现算法，进而实现网络的加速。
     # 适用场景是网络结构固定（不是动态变化的），网络的输入形状（包括 batch size，图片大小，输入的通道）是不变的

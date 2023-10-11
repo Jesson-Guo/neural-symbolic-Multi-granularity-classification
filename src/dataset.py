@@ -108,7 +108,7 @@ class TinyImagenetDataset(Dataset):
 
         image = self.transform(image)
         box = torch.as_tensor(box, dtype=torch.float32)
-        label = torch.as_tensor(label)
+        # label = torch.as_tensor(label)
 
         target = {}
         target["boxes"] = box.reshape(1,4)

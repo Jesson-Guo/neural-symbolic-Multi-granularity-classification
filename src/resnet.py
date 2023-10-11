@@ -284,8 +284,8 @@ class ResNet(nn.Module):
         # ImageNet 需要maxpool
         x = self.avgpool(x)
         # F.avg_pool2d(x, 4)
-        x = torch.flatten(x, 1)
-        out = self.fc(x)
+        out = torch.flatten(x, 1)
+        out = self.fc(out)
 
         return out, x
 

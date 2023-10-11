@@ -10,18 +10,41 @@ class Node(object):
     def __init__(self, wnid, name, parent=None):
         self.id = wnid
         self.name = name
+        self.layer = 0
         self.parent = parent
         self.children = {}
         self.nchild = 0 # num of children
         self.ncount= 0 # num of ImageNet1K children
         self.weight = None
+        self.classifier = None
+        self.subid = {}
 
     def update_child(self, node):
         self.children[self.nchild] = node
         self.nchild += 1
+    
+    def set_layer(self, layer):
+        self.layer = layer
 
     def set_weight(self, weight):
         self.weight = weight
+
+    def set_classifier(self, classifier):
+        self.classifier = classifier
+
+    def set_subid(self):
+        keys_list = list(self.children.keys())
+        for i in range(len(keys_list)):
+            self.subid[self.children[keys_list[i]].id] = i+1
+
+    def get_subid(self, l):
+        if l not in self.subid.keys():
+            return 0
+        else:
+            return self.subid[l]
+
+    def num_child(self):
+        return len(self.children.keys())
 
     def is_leaf(self):
         if len(self.children) == 0:

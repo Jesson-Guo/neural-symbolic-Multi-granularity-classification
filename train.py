@@ -1,5 +1,6 @@
 import time
 import progressbar
+import copy
 
 import torch
 
@@ -7,7 +8,7 @@ from src.utils import *
 from engine.symbolic_engine import *
 
 
-def train_one_epoch(dataloader, model, infer_tree, optimizer, criterion, status, device):
+def train_one_epoch(dataloader, model, infer_tree, optimizer, criterion, lpaths, status, device):
     model.train()
     his, epoch = status
 
@@ -15,19 +16,24 @@ def train_one_epoch(dataloader, model, infer_tree, optimizer, criterion, status,
     bar = progressbar.ProgressBar(0, len(dataloader))
 
     for i, (x, targets) in enumerate(dataloader):
-        # label = label.cuda()
         x = torch.autograd.Variable(x)
         x = x.to(device)
 
-        labels = torch.autograd.Variable(targets['labels'])
-        labels = labels.to(device)
+        labels = targets['labels'].cpu().numpy()
+        label_paths = []
+        for l in list(labels):
+            lp = copy.deepcopy(lpaths[l])
+            lp.reverse()
+            lp.append(l)
+            label_paths.append(lp)
+        # labels = labels.to(device)
 
-        out = model(x)
+        out, x = model(x)
+        # TODO 是否考虑原始resnet的loss ？
+        # loss = criterion(out, labels)
+
         # inference
-        out = infer_tree.infer(out)
-        loss = 0
-        for i in range(len(out)):
-            loss += criterion(out[0], labels[i])
+        out, loss = infer_tree.infer(x, label_paths)
 
         his.update(loss.item(), x.shape[0])
 
