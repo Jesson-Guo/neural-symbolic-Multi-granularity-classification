@@ -17,6 +17,8 @@ class Node(object):
         self.ncount= 0 # num of ImageNet1K children
         self.weight = None
         self.classifier = None
+        self.prob = None
+        self.path_prob = None
         self.subid = {}
 
     def update_child(self, node):

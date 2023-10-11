@@ -89,7 +89,7 @@ def main(args):
                 label2id[node.id] = index
                 index += 1
 
-    infer_tree = InferTree(tree, label2id, criterion, device)
+    infer_tree = InferTree(tree, label2id, 200, args.lamb, device)
     # infer_tree.format_tree()
     infer_tree.build_tree()
 
@@ -175,7 +175,7 @@ def main(args):
         if epoch % args.eval == 0:
             if val_sampler != None:
                 val_sampler.set_epoch(epoch)
-            acc = evaluate(val_loader, model, infer_tree, device)
+            acc = evaluate(val_loader, model, infer_tree, lpaths, device)
             print(f'\
                 Epoch: [{epoch}][{args.epochs+1}]\t \
                 acc: {acc}\t')
@@ -186,7 +186,8 @@ def main(args):
                 'epoch': epoch,
                 'best_acc': best_acc,
                 'optimizer' : optimizer.state_dict(),
-                'scheduler': scheduler.state_dict()
+                'scheduler': scheduler.state_dict(),
+                'tree': infer_tree
             }
             if args.ngpu > 1:
                 state['model'] = model.module.state_dict()
@@ -205,6 +206,7 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=72, help='random seed')
     parser.add_argument('--epochs', type=int, default=50, help='number of epochs to train')
     parser.add_argument('--use_cbam', type=bool, default=True, help='use cbam or not')
+    parser.add_argument('--lamb', type=float, default=1e-3, help='coefficient of the regularization term')
     parser.add_argument('--lr', type=float, default=1e-4, help='initial learning rate')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
     parser.add_argument('--weight-decay', type=float, default=1e-4, help='weight-decay')

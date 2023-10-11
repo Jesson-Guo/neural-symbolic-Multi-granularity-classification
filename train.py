@@ -16,24 +16,21 @@ def train_one_epoch(dataloader, model, infer_tree, optimizer, criterion, lpaths,
     bar = progressbar.ProgressBar(0, len(dataloader))
 
     for i, (x, targets) in enumerate(dataloader):
+        # if i > 2:
+        #     break
         x = torch.autograd.Variable(x)
         x = x.to(device)
 
-        labels = targets['labels'].cpu().numpy()
-        label_paths = []
-        for l in list(labels):
-            lp = copy.deepcopy(lpaths[l])
-            lp.reverse()
-            lp.append(l)
-            label_paths.append(lp)
-        # labels = labels.to(device)
+        labels = torch.autograd.Variable(targets['labels'])
+        labels = labels.to(device)
 
         out, x = model(x)
         # TODO 是否考虑原始resnet的loss ？
         # loss = criterion(out, labels)
 
         # inference
-        out, loss = infer_tree.infer(x, label_paths)
+        out, loss = infer_tree.forward(x)
+        loss += criterion(out, labels)
 
         his.update(loss.item(), x.shape[0])
 

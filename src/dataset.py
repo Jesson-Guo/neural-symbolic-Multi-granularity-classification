@@ -29,14 +29,6 @@ class TinyImagenetDataset(Dataset):
         self.label2id = label2id
         self.instances = self._make_dataset(file_path)
 
-    def _make_label_path(self, label_paths, label2id):
-        lpaths = {}
-        for k in label_paths.keys():
-            lpaths[k] = []
-            for a in label_paths[k]:
-                lpaths[k].append(label2id[a])
-        return lpaths
-
     def _make_dataset(
         self,
         directory: str
