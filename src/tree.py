@@ -51,30 +51,16 @@ class InferTree(nn.Module):
         def build(node, layer):
             if node.is_leaf():
                 return layer
+
+            classifier = {}
+            classifier['conv'] = nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0, bias=False).to(self.device)
             layers = [
-                # nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0, bias=False),
                 nn.Flatten(),
                 nn.Linear(512, node.num_child()+1)
             ]
-            # 增加一个类别表示分类错误（需要返回到父节点）？，
-            # TODO 训练时batch_size是否可以 >1?
-            # if node.num_child() > 1:
-            #     layers.append(nn.Linear(512, node.num_child()+1))
-            # else:
-            #     layers.append(nn.Linear(512, 1))
-
-            node.set_subid()
-            classifier = nn.Sequential(*layers).to(self.device)
+            classifier['fc'] = nn.Sequential(*layers).to(self.device)
             node.set_classifier(classifier)
             self.sub_node_classifier[node.layer].append(node)
-
-            # classifier = {}
-            # classifier['conv'] = nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0, bias=False).to(self.device)
-            # layers = [
-            #     nn.Flatten(),
-            #     nn.Linear(512, node.num_child()+1)
-            # ]
-            # classifier['fc'] = nn.Sequential(*layers).to(self.device)
 
             depth = 0
             for i in node.children.keys():
@@ -95,54 +81,24 @@ class InferTree(nn.Module):
         penalty = torch.tensor(0.0).to(self.device)
         out = torch.zeros([x.shape[0], self.num_classes+1], dtype=torch.float32).to(self.device)
 
-        # for l, nodes in self.sub_node_classifier.items():
-        #     for node in nodes:
-        #         sub_output = node.classifier(x)
-        #         sub_labels = []
-        #         for label in labels.cpu().numpy():
-        #             sub_labels.append(node.get_subid(label))
-        #         sub_labels = torch.as_tensor(sub_labels).to(self.device)
-        #         loss += self.criterion(sub_output, sub_labels) * self.penalty_list[l]
-        #         for _, child in node.children.items():
-        #             if child.is_leaf():
-        #                 idx = self.label2id[child.wnid]
-        #                 out[:, idx] += sub_output
-
-        # return out, loss
-
         ll = 0
 
+        self.root.feature = x
         for l, nodes in self.sub_node_classifier.items():
             for node in nodes:
-                sub_output = node.classifier(x)
-                sub_labels = []
-                for label in labels.cpu().numpy():
-                    lp = lpaths[label]
-                    if len(lp) <= l:
-                        sub_labels.append(0)
-                    else:
-                        sub_labels.append(node.get_subid(lp[l]))
-                sub_labels = torch.as_tensor(sub_labels).to(self.device)
-
-                # penalty += self.criterion(sub_output, sub_labels) * self.penalty_list[l]
-                penalty += self.criterion(sub_output, sub_labels)
+                sub_feature = node.classifier['conv'](node.feature)
+                sub_output = node.classifier['fc'](sub_feature)
 
                 for i, child in node.children.items():
                     child.prob = sub_output[:, i]
                     child.path_prob = sub_output[:, i] * node.path_prob
 
-                    # alpha = torch.sum(child.path_prob * child.prob, 0) / torch.sum(child.path_prob, 0)
-                    # penalty += torch.log(alpha)
+                    child.feature = sub_feature
 
                     # 有些子节点出现在了不同的分支下
                     if child.is_leaf():
                         idx = label2id[child.wnid]
-                        out[:, idx] += child.path_prob
+                        out[:, idx] += child.prob
                         ll += 1
-
-                # calculate penalty
-                # penalty += penalty * self.penalty_list[l] / len(nc.children)
-
-        # penalty = -penalty
 
         return out, penalty
