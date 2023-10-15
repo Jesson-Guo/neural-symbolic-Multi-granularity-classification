@@ -21,7 +21,10 @@ def train_one_epoch(dataloader, model, infer_tree, optimizer, criterion, lpaths,
         x = torch.autograd.Variable(x)
         x = x.to(device)
 
-        labels = torch.autograd.Variable(targets['labels'])
+        # cifar10:
+        labels = torch.autograd.Variable(targets)
+        # tinyimagenet:
+        # labels = torch.autograd.Variable(targets['labels'])
         labels = labels.to(device)
 
         out, x = model(x)
@@ -29,8 +32,9 @@ def train_one_epoch(dataloader, model, infer_tree, optimizer, criterion, lpaths,
         # loss = criterion(out, labels)
 
         # inference
-        out, loss = infer_tree.forward(x)
-        loss += criterion(out, labels)
+        loss = criterion(out, labels)
+        # out, penalty = infer_tree.forward(x, targets)
+        # loss += penalty
 
         his.update(loss.item(), x.shape[0])
 
@@ -39,10 +43,12 @@ def train_one_epoch(dataloader, model, infer_tree, optimizer, criterion, lpaths,
         optimizer.step()
 
         bar.update(i)
+        end = time.time()
+        # print(f'\
+        #     Epoch: [{epoch}][{i+1}/{len(dataloader)}]\t \
+        #     Time: {end-start}\t \
+        #     Loss: {his.avg}\t')
+        # start = end
 
-    end = time.time()
 
-    print(f'\
-        Epoch: [{epoch}][{i+1}/{len(dataloader)}]\t \
-        Time: {end-start}\t \
-        Loss: {his.avg}\t')
+    

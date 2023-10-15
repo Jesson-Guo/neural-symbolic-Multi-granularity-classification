@@ -47,11 +47,12 @@ def get_weights_from_checkpoint(checkpoint):
 
 # 决策树非叶节点用一个全连接层 或者 计算内积
 class InferTree(nn.Module):
-    def __init__(self, root, label2id, num_classes, lamb, device) -> None:
+    def __init__(self, root, label2id, num_classes, criterion, lamb, device) -> None:
         super().__init__()
         self.root = root
         self.label2id = label2id
         self.num_classes = num_classes
+        self.criterion = criterion
         self.lamb = lamb
         self.device = device
 
@@ -100,8 +101,7 @@ class InferTree(nn.Module):
             layers = [
                 # nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0, bias=False),
                 nn.Flatten(),
-                nn.Linear(512, node.num_child()),
-                nn.Sigmoid()
+                nn.Linear(512, node.num_child()+1)
             ]
             # 增加一个类别表示分类错误（需要返回到父节点）？，
             # TODO 训练时batch_size是否可以 >1?
@@ -127,176 +127,56 @@ class InferTree(nn.Module):
         self.depth = build(node, 1)
         return node
 
-    def forward(self, x):
-        loss = 0.
+    def forward(self, x, labels):
         # 使用小分类器进行分类, 可并行
         # TODO 一个高效的训练方法，将所有的小分类器拼成一个大的，最后再作分割，可以不使用for循环
 
         penalty = torch.tensor(0.0).to(self.device)
         out = torch.zeros([x.shape[0], self.num_classes], dtype=torch.float64).to(self.device)
 
+        # for l, nodes in self.sub_node_classifier.items():
+        #     for node in nodes:
+        #         sub_output = node.classifier(x)
+        #         sub_labels = []
+        #         for label in labels.cpu().numpy():
+        #             sub_labels.append(node.get_subid(label))
+        #         sub_labels = torch.as_tensor(sub_labels).to(self.device)
+        #         loss += self.criterion(sub_output, sub_labels) * self.penalty_list[l]
+        #         for _, child in node.children.items():
+        #             if child.is_leaf():
+        #                 idx = self.label2id[child.wnid]
+        #                 out[:, idx] += sub_output
+
+        # return out, loss
+
         ll = 0
 
         for l, nodes in self.sub_node_classifier.items():
-            for nc in nodes:
-                prob = nc.classifier(x)
+            for node in nodes:
+                sub_output = node.classifier(x)
+                sub_labels = []
+                for label in labels.cpu().numpy():
+                    sub_labels.append(node.get_subid(label))
+                sub_labels = torch.as_tensor(sub_labels).to(self.device)
+                # penalty += self.criterion(sub_output, sub_labels) * self.penalty_list[l]
+                penalty += self.criterion(sub_output, sub_labels)
 
-                i = 0
-                for _, child in nc.children.items():
-                    child.prob = prob[:, i]
-                    child.path_prob = prob[:, i] * nc.path_prob
+                for i, child in node.children.items():
+                    child.prob = sub_output[:, i]
+                    child.path_prob = sub_output[:, i] * node.path_prob
 
-                    alpha = torch.sum(child.path_prob * child.prob, 0) / torch.sum(child.path_prob, 0)
-                    penalty += torch.log(alpha)
+                    # alpha = torch.sum(child.path_prob * child.prob, 0) / torch.sum(child.path_prob, 0)
+                    # penalty += torch.log(alpha)
 
                     # 有些子节点出现在了不同的分支下
                     if child.is_leaf():
-                        idx = self.label2id[child.id]
+                        idx = self.label2id[child.wnid]
                         out[:, idx] += child.path_prob
                         ll += 1
 
-                    i += 1
-
                 # calculate penalty
-                penalty += penalty * self.penalty_list[l] / len(nc.children)
+                # penalty += penalty * self.penalty_list[l] / len(nc.children)
 
-        return out, -penalty
+        # penalty = -penalty
 
-    # def infer(self, x):
-    #     node = self.root
-    #     out = [self.label2id[node.id]]
-    #     # TODO 一个高效的训练方法，将所有的小分类器拼成一个大的，最后再作分割，可以不使用for循环
-    #     while not node.is_leaf():
-    #         pred = node.classifier(x)
-    #         _, pred = torch.max(pred.data, 1)
-    #         pred = pred.item()
-    #         if pred == 0:
-    #             break
-    #         # 有一个错误类
-    #         # TODO 当node只有一个子节点时需要可以不考虑错误类？
-    #         pred_index = list(node.children.keys())[pred-1]
-    #         pred_node = node.children[pred_index]
-    #         out.append(self.label2id[pred_node.id])
-    #         node = pred_node
-    #     return out
-
-
-# class FastInferTree(nn.Module):
-#     def __init__(self, root, label2id, criterion, device) -> None:
-#         super().__init__()
-#         self.root = root
-#         self.label2id = label2id
-#         self.criterion = criterion
-#         self.device = device
-
-#         self.depth = 0
-#         self.inner_node = {}
-#         self.num_inner_node = 0
-#         self.leaves = []
-#         self.sub_node_classifier = None
-#         self.depth = 0
-#         self.__init_tree()
-
-#     def __init_tree(self):
-#         self.inner_node[1] = [1]
-#         self.num_inner_node += 1
-
-#         que = queue.Queue()
-#         que.put(self.root)
-
-#         while not que.empty():
-#             self.depth += 1
-#             que_size = que.size()
-#             self.inner_node[self.depth+1] = []
-
-#             for i in range(que_size):
-#                 node = que.get()
-#                 self.inner_node[self.depth+1].append(len(node.children))
-#                 self.num_inner_node += len(node.children)
-
-#                 for _, child in node.children.items():
-#                     que.put(child)
-
-#     def build_tree(self):
-#         layers = [
-#             # nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0, bias=False),
-#             nn.Flatten(),
-#             nn.Linear(512, self.num_inner_node),
-#             nn.Sigmoid()
-#         ]
-#         self.sub_node_classifier = nn.Sequential(*layers)
-#         self.sub_node_classifier = self.sub_node_classifier.to(self.device)
-
-#     def train(self, x, label_paths):
-#         out = {}
-#         loss = 0.
-#         # 使用小分类器进行分类, 可并行
-#         # TODO 一个高效的训练方法，将所有的小分类器拼成一个大的，最后再作分割，可以不使用for循环
-#         prob = self.sub_node_classifier(x)
-#         path_prob = prob[:, 0]
-#         begin = 1
-#         penalty = torch.tensor(0.0).to(self.device)
-
-#         que = queue.Queue()
-#         que.put(self.root)
-
-#         while not que.empty():
-#             que_size = que.size()
-#             for i in range(que_size):
-#                 node = que.get()
-#                 if node.is_leaf():
-#                     pass
-#                 else:
-#                     self.label2id[node.id]
-
-#                 for _, child in node.children.items():
-#                     que.put(child)
-
-#         for i in range(1, self.depth):
-#             num = sum(self.inner_node[i+1])
-#             for j in range(begin, begin+num):
-
-#             layer_prob = prob[:, begin:begin+num]
-
-
-#         node_prob = []
-#         path_prob = []
-
-
-
-#         for nc in self.sub_node_classifier:
-#             sub_labels = []
-#             layer = nc.layer
-#             for lp in label_paths:
-#                 if layer >= len(lp):
-#                     sub_labels.append(0)
-#                 else:
-#                     sub_labels.append(nc.get_subid(lp[layer]))
-#             sub_labels = torch.as_tensor(sub_labels)
-#             sub_labels = torch.autograd.Variable(sub_labels)
-#             sub_labels = sub_labels.to(self.device)
-
-#             sub_out = nc.classifier(x)
-#             sub_loss = self.criterion(sub_out, sub_labels)
-
-#             out[nc] = sub_out
-#             loss += sub_loss
-#         return out, loss
-
-#     def infer(self, x):
-#         node = self.root
-#         out = [self.label2id[node.id]]
-#         # TODO 一个高效的训练方法，将所有的小分类器拼成一个大的，最后再作分割，可以不使用for循环
-#         while not node.is_leaf():
-#             pred = node.classifier(x)
-#             _, pred = torch.max(pred.data, 1)
-#             pred = pred.item()
-#             if pred == 0:
-#                 break
-#             # 有一个错误类
-#             # TODO 当node只有一个子节点时需要可以不考虑错误类？
-#             pred_index = list(node.children.keys())[pred-1]
-#             pred_node = node.children[pred_index]
-#             out.append(self.label2id[pred_node.id])
-#             node = pred_node
-#         return out
+        return out, penalty

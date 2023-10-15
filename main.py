@@ -68,40 +68,31 @@ def main(args):
         )
 
     # define inference module
-    wnids = open(os.path.join(args.data, 'wnids.txt'), 'r')
+    wnids = open(args.wnids, 'r')
     wnids = ''.join(wnids.readlines()).split()
 
-    tree, dic = get_full_hierarchy(args.hier)
-    pruning_count(tree, wnids)
-    pruning(tree)
+    _, dic = get_full_hierarchy(args.hier)
+    tree, _ = get_hierarchy(dic, args.words)
 
     lpaths = {}
     label2id = {}
-    index = 0
+    index = 1
     for wnid in wnids:
         label2id[wnid] = index
         index += 1
     for wnid in wnids:
         node = dic[wnid]
-        while node.parent != None:
-            node = node.parent
-            if node.id not in label2id.keys():
-                label2id[node.id] = index
-                index += 1
-
-    infer_tree = InferTree(tree, label2id, 200, args.lamb, device)
-    # infer_tree.format_tree()
-    infer_tree.build_tree()
-
-    for wnid in wnids:
-        node = dic[wnid]
-        # while not node.is_leaf():
-        #     node = node.children[0]
         lpaths[label2id[wnid]] = []
         while node.parent != None:
             node = node.parent
-            lpaths[label2id[wnid]].append(label2id[node.id])
+            if node.wnid not in label2id.keys():
+                label2id[node.wnid] = index
+                index += 1
+            lpaths[label2id[wnid]].append(label2id[node.wnid])
 
+    infer_tree = InferTree(tree, label2id, 11, criterion, args.lamb, device)
+    # infer_tree.format_tree()
+    infer_tree.build_tree()
 
     # 程序在开始时花费一点额外时间，为整个网络的每个卷积层搜索最适合它的卷积实现算法，进而实现网络的加速。
     # 适用场景是网络结构固定（不是动态变化的），网络的输入形状（包括 batch size，图片大小，输入的通道）是不变的
@@ -110,21 +101,51 @@ def main(args):
     # data loading
     normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
-    train_dataset = TinyImagenetDataset(
-        os.path.join(args.data, 'train'),
-        64,
-        label2id,
-        transforms.Compose([
-            # transforms.RandomResizedCrop(32),
-            # transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ])
-    )
+    train_dataset = None
+    val_dataset = None
+    if args.data == "cifar10":
+        train_dataset = torchvision.datasets.CIFAR10(
+            root=args.data_path,
+            train=True,
+            transform=transforms.Compose([
+                transforms.RandomCrop(32, 4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
+        val_dataset = torchvision.datasets.CIFAR10(
+            root=args.data_path,
+            train=False,
+            transform=transforms.Compose([
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
+    elif args.data == "tiny-imagenet":
+        train_dataset = TinyImagenetDataset(
+            os.path.join(args.data_path, 'train'),
+            64,
+            label2id,
+            transforms.Compose([
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
+        val_dataset = TinyImagenetDataset(
+            os.path.join(args.data_path, 'val'),
+            64,
+            label2id,
+            transforms.Compose([
+                # transforms.Resize(32),
+                transforms.ToTensor(),
+                normalize,
+            ])
+        )
+
     train_sampler = None
     if args.ngpu > 1:
         train_sampler = DistributedSampler(train_dataset)
-    print(train_sampler)
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         sampler=train_sampler,
@@ -134,16 +155,6 @@ def main(args):
         pin_memory=True
     )
 
-    val_dataset = TinyImagenetDataset(
-        os.path.join(args.data, 'val'),
-        64,
-        label2id,
-        transforms.Compose([
-            # transforms.Resize(32),
-            transforms.ToTensor(),
-            normalize,
-        ])
-    )
     val_sampler = None
     if args.ngpu > 1:
         val_sampler = DistributedSampler(train_dataset)
@@ -178,6 +189,7 @@ def main(args):
             acc = evaluate(val_loader, model, infer_tree, lpaths, device)
             print(f'\
                 Epoch: [{epoch}][{args.epochs+1}]\t \
+                Loss: {losses.val}\t \
                 acc: {acc}\t')
             # remember best model and save checkpoint
             is_best = acc > best_acc
@@ -210,7 +222,8 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=1e-4, help='initial learning rate')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
     parser.add_argument('--weight-decay', type=float, default=1e-4, help='weight-decay')
-    parser.add_argument('--data', type=str, default='.', help='dataset path')
+    parser.add_argument('--data_path', type=str, default='.', help='dataset path')
+    parser.add_argument('--data', type=str, default='cifar10', help='dataset name')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--prefix', type=str, default='test', help='prefix for logging & checkpoint saving')
@@ -218,6 +231,7 @@ if __name__ == "__main__":
     parser.add_argument('--eval', type=int, default=1, help='numbers of epochs to eval model during training')
     parser.add_argument('--local_rank', default=os.getenv('LOCAL_RANK', -1), type=int)
     parser.add_argument('--wnids', type=str, default='', help='wnids file path')
+    parser.add_argument('--words', type=str, default='', help='words file path')
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
     parser.add_argument('--info', type=str, default='./images_info.pkl', help='images info path')
     parser.add_argument('--conf', type=float, default=0.4, help='confidence to accept the predicted label')

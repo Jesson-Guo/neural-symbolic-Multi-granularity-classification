@@ -17,7 +17,10 @@ def evaluate(dataloader, model, infer_tree, lpaths, device):
         x = torch.autograd.Variable(x)
         x = x.to(device)
 
-        labels = torch.autograd.Variable(targets['labels'])
+        # cifar10:
+        labels = torch.autograd.Variable(targets)
+        # tinyimagenet:
+        # labels = torch.autograd.Variable(targets['labels'])
         labels = labels.to(device)
 
         out, x = model(x)
@@ -25,7 +28,7 @@ def evaluate(dataloader, model, infer_tree, lpaths, device):
         # loss = criterion(out, labels)
 
         # inference
-        out, _ = infer_tree.forward(x)
+        # out, _ = infer_tree.forward(x, targets)
         out = torch.softmax(out, dim=1)
         pred = out.data.max(1)[1]
 
