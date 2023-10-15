@@ -1,6 +1,10 @@
 import xml.etree.cElementTree as ET
 
 
+lpaths = {}
+label2id = {}
+
+
 class Node(object):
     def __init__(self, wnid, name, parent=None):
         self.wnid = wnid
@@ -73,20 +77,34 @@ def get_full_hierarchy(file):
     return dic['fall11'], dic
 
 
-def get_hierarchy(dic, words_path):
-    f = open(words_path, 'r')
-    words = {}
-    for line in f.readlines():
-        line = line.split('\n')[0]
-        line = line.split('\t')
-        words[line[0]] = line[1]
+def get_hierarchy(args):
+    _, dic = get_full_hierarchy(args.hier)
 
+    wnids = open(args.wnids, 'r')
+    wnids = ''.join(wnids.readlines()).split()
+
+    # init label2id and lpaths
+    index = 1
+    for wnid in wnids:
+        label2id[wnid] = index
+        index += 1
+    for wnid in wnids:
+        node = dic[wnid]
+        lpaths[label2id[wnid]] = [label2id[wnid]]
+        while node.parent != None:
+            node = node.parent
+            if node.wnid not in label2id.keys():
+                label2id[node.wnid] = index
+                index += 1
+            lpaths[label2id[wnid]].insert(0, label2id[node.wnid])
+
+    # init tree
     node_dict = {}
     leaf = None
-    for k, label in words.items():
-        leaf = Node(k, label)
-        node_dict[k] = leaf
-        node = dic[k]
+    for wnid in wnids:
+        node = dic[wnid]
+        leaf = Node(wnid, node.name)
+        node_dict[wnid] = leaf
         while node.parent != None:
             if not node.parent.wnid in node_dict.keys():
                 temp = Node(node.parent.wnid, node.parent.name)

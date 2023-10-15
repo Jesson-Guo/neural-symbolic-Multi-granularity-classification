@@ -5,52 +5,14 @@ import copy
 import queue
 
 import torch.nn as nn
-
-
-MODEL_FC_KEYS = (
-    "fc.weight",
-    "linear.weight",
-    "module.linear.weight",
-    "module.net.linear.weight",
-    "output.weight",
-    "module.output.weight",
-    "output.fc.weight",
-    "module.output.fc.weight",
-    "classifier.weight",
-    "model.last_layer.3.weight",
-)
-
-
-def get_weights_from_state_dict(state_dict):
-    fc = None
-    for key in MODEL_FC_KEYS:
-        if key in state_dict:
-            fc = state_dict[key].squeeze()
-            break
-    if fc is not None:
-        return fc.detach()
-
-
-def get_weights_from_checkpoint(checkpoint):
-    data = torch.load(checkpoint, map_location=torch.device("cpu"))
-
-    for key in ("net", "state_dict"):
-        try:
-            state_dict = data[key]
-            break
-        except:
-            state_dict = data
-
-    fc = get_weights_from_state_dict(state_dict)
-    return fc
+from src.hierarchy import label2id, lpaths
 
 
 # 决策树非叶节点用一个全连接层 或者 计算内积
 class InferTree(nn.Module):
-    def __init__(self, root, label2id, num_classes, criterion, lamb, device) -> None:
+    def __init__(self, root, num_classes, criterion, lamb, device) -> None:
         super().__init__()
         self.root = root
-        self.label2id = label2id
         self.num_classes = num_classes
         self.criterion = criterion
         self.lamb = lamb
@@ -85,15 +47,6 @@ class InferTree(nn.Module):
         node = self.root
         return depth(node, 1)
 
-    # def format_tree(self):
-    #     for _, leaf in self.leaves.items():
-    #         if leaf.layer < self.depth:
-    #             for i in range(leaf.layer+1, self.depth+1):
-    #                 sub = copy.deepcopy(leaf)
-    #                 sub.set_layer(i)
-    #                 leaf.update_child(sub)
-    #                 leaf = sub
-
     def build_tree(self):
         def build(node, layer):
             if node.is_leaf():
@@ -111,10 +64,18 @@ class InferTree(nn.Module):
             #     layers.append(nn.Linear(512, 1))
 
             node.set_subid()
-            classifier = nn.Sequential(*layers)
-            classifier.to(self.device)
+            classifier = nn.Sequential(*layers).to(self.device)
             node.set_classifier(classifier)
             self.sub_node_classifier[node.layer].append(node)
+
+            # classifier = {}
+            # classifier['conv'] = nn.Conv2d(512, 512, kernel_size=1, stride=1, padding=0, bias=False).to(self.device)
+            # layers = [
+            #     nn.Flatten(),
+            #     nn.Linear(512, node.num_child()+1)
+            # ]
+            # classifier['fc'] = nn.Sequential(*layers).to(self.device)
+
             depth = 0
             for i in node.children.keys():
                 depth = max(depth, build(node.children[i], layer+1))
@@ -132,7 +93,7 @@ class InferTree(nn.Module):
         # TODO 一个高效的训练方法，将所有的小分类器拼成一个大的，最后再作分割，可以不使用for循环
 
         penalty = torch.tensor(0.0).to(self.device)
-        out = torch.zeros([x.shape[0], self.num_classes], dtype=torch.float64).to(self.device)
+        out = torch.zeros([x.shape[0], self.num_classes+1], dtype=torch.float32).to(self.device)
 
         # for l, nodes in self.sub_node_classifier.items():
         #     for node in nodes:
@@ -156,8 +117,13 @@ class InferTree(nn.Module):
                 sub_output = node.classifier(x)
                 sub_labels = []
                 for label in labels.cpu().numpy():
-                    sub_labels.append(node.get_subid(label))
+                    lp = lpaths[label]
+                    if len(lp) <= l:
+                        sub_labels.append(0)
+                    else:
+                        sub_labels.append(node.get_subid(lp[l]))
                 sub_labels = torch.as_tensor(sub_labels).to(self.device)
+
                 # penalty += self.criterion(sub_output, sub_labels) * self.penalty_list[l]
                 penalty += self.criterion(sub_output, sub_labels)
 
@@ -170,7 +136,7 @@ class InferTree(nn.Module):
 
                     # 有些子节点出现在了不同的分支下
                     if child.is_leaf():
-                        idx = self.label2id[child.wnid]
+                        idx = label2id[child.wnid]
                         out[:, idx] += child.path_prob
                         ll += 1
 

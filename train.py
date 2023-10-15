@@ -8,7 +8,7 @@ from src.utils import *
 from engine.symbolic_engine import *
 
 
-def train_one_epoch(dataloader, model, infer_tree, optimizer, criterion, lpaths, status, device):
+def train_one_epoch(dataloader, model, infer_tree, optimizer, criterion, status, device):
     model.train()
     his, epoch = status
 
@@ -21,20 +21,18 @@ def train_one_epoch(dataloader, model, infer_tree, optimizer, criterion, lpaths,
         x = torch.autograd.Variable(x)
         x = x.to(device)
 
-        # cifar10:
+        targets += 1
         labels = torch.autograd.Variable(targets)
-        # tinyimagenet:
-        # labels = torch.autograd.Variable(targets['labels'])
         labels = labels.to(device)
 
+        # out = torch.autograd.Variable(out)
         out, x = model(x)
         # TODO 是否考虑原始resnet的loss ？
         # loss = criterion(out, labels)
 
         # inference
-        loss = criterion(out, labels)
-        # out, penalty = infer_tree.forward(x, targets)
-        # loss += penalty
+        out, loss = infer_tree.forward(x, targets)
+        loss += criterion(out, labels)
 
         his.update(loss.item(), x.shape[0])
 

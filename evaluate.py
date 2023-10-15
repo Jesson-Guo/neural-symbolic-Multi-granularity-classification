@@ -6,7 +6,7 @@ from src.utils import *
 
 
 @torch.no_grad()
-def evaluate(dataloader, model, infer_tree, lpaths, device):
+def evaluate(dataloader, model, infer_tree, device):
     model.eval()
     acc = 0.
     # cnn_acc = 0
@@ -17,10 +17,8 @@ def evaluate(dataloader, model, infer_tree, lpaths, device):
         x = torch.autograd.Variable(x)
         x = x.to(device)
 
-        # cifar10:
+        targets += 1
         labels = torch.autograd.Variable(targets)
-        # tinyimagenet:
-        # labels = torch.autograd.Variable(targets['labels'])
         labels = labels.to(device)
 
         out, x = model(x)
@@ -28,7 +26,7 @@ def evaluate(dataloader, model, infer_tree, lpaths, device):
         # loss = criterion(out, labels)
 
         # inference
-        # out, _ = infer_tree.forward(x, targets)
+        out, _ = infer_tree.forward(x, targets)
         out = torch.softmax(out, dim=1)
         pred = out.data.max(1)[1]
 
