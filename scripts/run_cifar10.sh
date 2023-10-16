@@ -1,17 +1,17 @@
 #!/bin/bash
-python main_v2.py \
-        --arch tiny-imagenet \
+python main_v3.py \
+        --arch cifar10 \
         --data_path ../data \
         --epochs 300 \
         --batch_size 64 \
-        --num_classes 200 \
+        --num_classes 10 \
         --lr 0.001 \
         --lamb 0.001 \
         --use_cbam 0 \
         --ngpu 1 \
-        --prefix RESNET18_TINY_IMAGENET \
+        --prefix RESNET18_CIFAR10 \
         --eval 1 \
+        --wnids ../data/cifar-10-batches-py/wnids.txt \
+        --words ../data/cifar-10-batches-py/words.txt \
         --hier ./structure_released.xml \
-        --wnids ../data/tiny-imagenet-200/wnids.txt \
-        --words ../data/tiny-imagenet-200/words.txt \
         -j 4

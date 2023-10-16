@@ -2,7 +2,6 @@ import argparse
 import os
 import random
 import shutil
-import copy
 
 import torch
 import torchvision
@@ -12,15 +11,9 @@ import torch.optim.lr_scheduler as lr_scheduler
 import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
 from torch.utils.data.distributed import DistributedSampler
-# from torchvision.models.resnet import resnet50
-from torchvision.models.detection import FasterRCNN, fasterrcnn_resnet50_fpn
-from torchvision.models.detection.rpn import AnchorGenerator
-from torchvision.models.detection.backbone_utils import _resnet_fpn_extractor
-from torchvision.ops import MultiScaleRoIAlign, misc
 
-# from src.resnet import *
 from src.resnet import *
-from src.dataset import TinyImagenetDataset, create_dataloader
+from src.dataset import TinyImagenet200, Imagenet1000, create_dataloader
 from src.hierarchy import *
 from src.tree import InferTree
 from engine.symbolic_engine import *
@@ -41,7 +34,12 @@ def main(args):
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
     # use resnet18
-    model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=args.num_classes+1, arch=args.arch, use_cbam=args.use_cbam)
+    if args.model == 'resnet50':
+        model = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=args.num_classes+1, arch=args.arch, use_cbam=args.use_cbam)
+        args.dim = 2048
+    else:
+        model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=args.num_classes+1, arch=args.arch, use_cbam=args.use_cbam)
+        args.dim = 512
 
     # define optimizer
     optimizer = torch.optim.Adam(
@@ -67,11 +65,6 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    tree, _ = get_hierarchy(args)
-
-    infer_tree = InferTree(tree, args.num_classes+1, criterion, args.lamb, device)
-    infer_tree.build_tree()
-
     # 程序在开始时花费一点额外时间，为整个网络的每个卷积层搜索最适合它的卷积实现算法，进而实现网络的加速。
     # 适用场景是网络结构固定（不是动态变化的），网络的输入形状（包括 batch size，图片大小，输入的通道）是不变的
     cudnn.benchmark = True
@@ -88,9 +81,7 @@ def main(args):
                 transforms.RandomCrop(32, 4),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
-                transforms.Normalize(
-                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
-                ),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
             ])
         )
         val_dataset = torchvision.datasets.CIFAR10(
@@ -98,33 +89,71 @@ def main(args):
             train=False,
             transform=transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Normalize(
-                    (0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)
-                ),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            ])
+        )
+    elif args.arch == "cifar100":
+        train_dataset = torchvision.datasets.CIFAR100(
+            root=args.data_path,
+            train=True,
+            transform=transforms.Compose([
+                transforms.RandomCrop(32, 4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            ])
+        )
+        val_dataset = torchvision.datasets.CIFAR100(
+            root=args.data_path,
+            train=False,
+            transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
             ])
         )
     elif args.arch == "tiny-imagenet":
-        train_dataset = TinyImagenetDataset(
-            root=os.path.join(args.data_path, 'train'),
+        train_dataset = TinyImagenet200(
+            root=args.data_path,
             image_size=64,
             transform=transforms.Compose([
-                transforms.RandomCrop(64, padding=8),
+                transforms.RandomCrop(64, 8),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
-                transforms.Normalize(
-                    [0.4802, 0.4481, 0.3975], [0.2302, 0.2265, 0.2262]
-                ),
-            ])
+                transforms.Normalize((0.4802, 0.4481, 0.3975), (0.2302, 0.2265, 0.2262)),
+            ]),
+            train=True
         )
-        val_dataset = TinyImagenetDataset(
-            root=os.path.join(args.data_path, 'val'),
+        val_dataset = TinyImagenet200(
+            root=args.data_path,
             image_size=64,
             transform=transforms.Compose([
                 transforms.ToTensor(),
-                transforms.Normalize(
-                    [0.4802, 0.4481, 0.3975], [0.2302, 0.2265, 0.2262]
-                ),
-            ])
+                transforms.Normalize((0.4802, 0.4481, 0.3975), (0.2302, 0.2265, 0.2262)),
+            ]),
+            train=False
+        )
+    elif args.arch == "imagenet":
+        train_dataset = Imagenet1000(
+            root=args.data_path,
+            image_size=224,
+            transform=transforms.Compose([
+                transforms.RandomResizedCrop(224),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            ]),
+            train=True
+        )
+        val_dataset = Imagenet1000(
+            root=args.data_path,
+            image_size=224,
+            transform=transforms.Compose([
+                transforms.Resize(224 + 32),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            ]),
+            train=False
         )
 
     train_sampler = None
@@ -135,6 +164,10 @@ def main(args):
 
     train_loader = create_dataloader(args, train_dataset, train_sampler, training=True)
     val_loader = create_dataloader(args, val_dataset, val_sampler, training=False)
+
+    tree, _ = get_hierarchy(args, train_dataset.class_to_idx)
+    infer_tree = InferTree(tree, args.num_classes+1, args.dim, criterion, args.lamb, device)
+    infer_tree.build_tree()
 
     best_acc = 0
 
@@ -190,6 +223,7 @@ if __name__ == "__main__":
     parser.add_argument('--weight-decay', type=float, default=1e-4, help='weight-decay')
     parser.add_argument('--data_path', type=str, default='.', help='dataset path')
     parser.add_argument('--arch', type=str, default='cifar10', help='dataset name')
+    parser.add_argument('--model', type=str, default='resnet18', help='dataset name')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('--num_classes', type=int, default=200, help='num of classes of dataset')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
