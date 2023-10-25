@@ -1,8 +1,6 @@
 import xml.etree.cElementTree as ET
-
-
-lpaths = {}
-label2id = {}
+import torch
+from utils.globals import *
 
 
 class Node(object):
@@ -16,10 +14,22 @@ class Node(object):
         self.ncount= 0 # num of ImageNet1K children
         self.weight = None
         self.classifier = None
+        self.sub_out = None
         self.prob = None
         self.path_prob = None
         self.feature = None
         self.subid = {}
+
+    def node_distance(self, node):
+        lp1 = get_value('lpaths')[self.wnid]
+        lp2 = get_value('lpaths')[node.wnid]
+
+        i, j = 0, 0
+        while i < len(lp1) and j < len(lp2) and lp1[i] == lp2[j]:
+            i += 1
+            j += 1
+
+        return (len(lp1)-1-i) + (len(lp2)-1-j)
 
     def update_child(self, node):
         self.children[self.nchild] = node
@@ -34,10 +44,9 @@ class Node(object):
     def set_classifier(self, classifier):
         self.classifier = classifier
 
-    def set_subid(self):
-        keys_list = list(self.children.keys())
-        for i in range(len(keys_list)):
-            self.subid[self.children[keys_list[i]].wnid] = i+1
+    def set_subid(self, label2id):
+        for i, child in self.children.items():
+            self.subid[label2id[child.wnid]] = i+1
 
     def get_subid(self, l):
         if l not in self.subid.keys():
@@ -56,12 +65,11 @@ class Node(object):
 
 
 def get_full_hierarchy(file):
-    tree = ET.ElementTree(file=file)
-    root = tree.getroot()
+    root = ET.ElementTree(file=file)
+    root = root.getroot()
 
     synset = root[1]
     dic = {'fall11':Node('fall11', 'Thing')}
-    tree = dic['fall11']
 
     queue = [synset]
 
@@ -76,68 +84,3 @@ def get_full_hierarchy(file):
             cur_tree.update_child(dic[wnid])
 
     return dic['fall11'], dic
-
-
-def get_hierarchy(args, class_to_idx):
-    _, dic = get_full_hierarchy(args.hier)
-
-    words = {}
-    wnids = []
-    if args.arch == 'cifar10' or args.arch == 'cifar100':
-        wnids = open(args.wnids, 'r')
-        wnids = ''.join(wnids.readlines()).split()
-        f = open(args.words, 'r')
-        for line in f.readlines():
-            line = line.split('\n')[0]
-            line = line.split('\t')
-            words[line[0]] = line[1]
-        for wnid in wnids:
-            label2id[wnid] = class_to_idx[words[wnid]] + 1
-    elif args.arch == 'tiny-imagenet' or args.arch == 'imagenet':
-        for k, v in class_to_idx.items():
-            wnids.append(k)
-            label2id[k] = v + 1
-
-    # init label2id and lpaths
-    index = args.num_classes + 1
-    for wnid in wnids:
-        node = dic[wnid]
-        lpaths[label2id[wnid]] = [label2id[wnid]]
-        while node.parent != None:
-            node = node.parent
-            if node.wnid not in label2id.keys():
-                label2id[node.wnid] = index
-                index += 1
-            lpaths[label2id[wnid]].insert(0, label2id[node.wnid])
-
-    # init tree
-    node_dict = {}
-    leaf = None
-    for wnid in wnids:
-        node = dic[wnid]
-        leaf = Node(wnid, node.name)
-        node_dict[wnid] = leaf
-        while node.parent != None:
-            if not node.parent.wnid in node_dict.keys():
-                temp = Node(node.parent.wnid, node.parent.name)
-                node_dict[node.parent.wnid] = temp
-                temp.update_child(leaf)
-                node = node.parent
-                leaf = temp
-            else:
-                temp = node_dict[node.parent.wnid]
-                temp.update_child(leaf)
-                break
-    return node_dict['fall11'], node_dict
-
-
-if __name__ == "__main__":
-    hier_path = './structure_released.xml'
-    words_path = './words.txt'
-
-    _, dic = get_full_hierarchy(hier_path)
-    tree = get_hierarchy(dic, words_path)
-    # pruning_count(tree, wnids)
-    # pruning(tree)
-
-    print()

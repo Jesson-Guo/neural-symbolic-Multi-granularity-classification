@@ -1,5 +1,5 @@
 #!/bin/bash
-python main_v3.py \
+python main.py \
         --arch cifar10 \
         --data_path ../data \
         --epochs 300 \
@@ -14,4 +14,6 @@ python main_v3.py \
         --wnids ../data/cifar-10-batches-py/wnids.txt \
         --words ../data/cifar-10-batches-py/words.txt \
         --hier ./structure_released.xml \
+        --cap 200000 \
+        --ckpt ./checkpoints/RESNET18_CIFAR10_model_best.pt \
         -j 4

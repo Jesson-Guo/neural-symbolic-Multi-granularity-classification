@@ -1,14 +1,8 @@
 import os
-import numpy as np
-import cv2
-from typing import List, Tuple, Dict
 
 import torch
 import torchvision
 from torch.utils.data import Dataset
-from torchvision import transforms
-
-from src.hierarchy import label2id
 
 
 class TinyImagenet200(Dataset):
