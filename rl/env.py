@@ -12,9 +12,9 @@ class TreeClassifyEnv(Env):
         super().__init__()
         # probability
         self.observation_space = spaces.Box(low=np.zeros(obs_len), high=np.ones(obs_len), dtype=np.float32)
-        # 0: select children
-        # 1: stop
-        # 2: select sibling
+        # 0: stop
+        # 1: select children
+        # 2: select parent
         self.action_space = spaces.Discrete(3)
         self.obs_len = obs_len
         self.decay = decay
@@ -30,53 +30,58 @@ class TreeClassifyEnv(Env):
     def step(self, batch_size, action):
         next_state = self.state
         reward = [0 for _ in range(batch_size)]
+        label2id = get_value('label2id')
+        id2label = get_value('id2label')
+        node_dict = get_value('node_dict')
+        lpaths = get_value('lpaths')
+
         for i in range(batch_size):
             if self.done[i]:
                 continue
-            lp = get_value('lpaths')[self.labels[i]]
-            lp_len = len(lp)
 
-            reward[i] = -self.layer[i]
-            if action[i] == 0:
+            lp = lpaths[self.labels[i]]
+            lp_len = len(lp)
+            target_node = node_dict[id2label[self.labels[i]]]
+
+            if action[i] == 1:
+                self.done[i] = 1
+                next_state[i] = self.state[i]
+                dist = target_node.node_distance(next_state[i], label2id, lpaths)
+                reward[i] = self.layer[i] if dist == 0 else -dist
+
+            elif action[i] == 0:
                 if self.state[i].is_leaf():
-                    self.done[i] = 1
                     next_state[i] = self.state[i]
-                    # for test
-                    if self.layer[i]-1 < len(lp) and get_value('label2id')[next_state[i].wnid] == lp[self.layer[i]-1]:
-                        reward[i] = self.layer[i]
+                    reward[i] = -self.layer[i]
                 else:
                     pred = self.state[i].sub_out[i].reshape(1, -1)
                     pred = torch.softmax(pred, dim=1).data.max(1)[1]
                     next_state[i] = self.state[i].children[pred.item()]
                     self.layer[i] += 1
-                    if self.layer[i]-1 < len(lp) and get_value('label2id')[next_state[i].wnid] == lp[self.layer[i]-1]:
-                        reward[i] = self.layer[i]
-            elif action[i] == 1:
-                self.done[i] = 1
-                next_state[i] = self.state[i]
-                if self.layer[i] != 1 and self.layer[i]-1 < len(lp) and get_value('label2id')[next_state[i].wnid] == lp[self.layer[i]-1]:
-                    reward[i] = self.layer[i]
+
+                    if self.layer[i] >= lp_len:
+                        reward[i] = -self.layer[i]
+                    else:
+                        corr_node = node_dict[id2label[lp[self.layer[i]]]]
+                        dist = corr_node.node_distance(next_state[i], label2id, lpaths)
+                        reward[i] = self.layer[i] if dist == 0 else -dist
+
             elif action[i] == 2:
-                # root
+                # root has no parent
                 if self.state[i].parent == None:
-                    self.done[i] = 1
                     next_state[i] = self.state[i]
-                    # for test
-                    reward[i] = -10
+                    reward[i] = -1
                 else:
-                    parent = self.state[i].parent
-                    for k, v in parent.children.items():
-                        if v == self.state[i]:
-                            break
-                    sub_out = copy.copy(parent.sub_out)
-                    sub_out[i, k] = 0
-
-                    pred = sub_out[i].reshape(1, -1)
-                    pred = torch.softmax(pred, dim=1).data.max(1)[1]
-                    next_state[i] = parent.children[pred.item()]
-
-                    if self.layer[i]-1 < len(lp) and get_value('label2id')[next_state[i].wnid] == lp[self.layer[i]-1]:
-                        reward[i] = self.layer[i]
+                    next_state[i] = self.state[i].parent
+                    self.layer[i] -= 1
+                    
+                    if self.layer[i] >= lp_len:
+                        reward[i] = -self.layer[i]
+                    else:
+                        corr_node = node_dict[id2label[lp[self.layer[i]]]]
+                        dist_curr = corr_node.node_distance(self.state[i], label2id, lpaths)
+                        dist_next = corr_node.node_distance(next_state[i], label2id, lpaths)
+                        reward[i] = dist_curr - dist_next
 
         self.state = next_state
         return next_state, reward, self.done, {}
