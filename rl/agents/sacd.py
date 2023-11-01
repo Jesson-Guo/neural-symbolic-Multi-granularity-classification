@@ -278,7 +278,7 @@ class SACD(nn.Module):
         x = x.cpu().detach().numpy().reshape(batch_size, -1)
 
         total_reward = 0
-        batch_state, _ = env.reset(batch_size, x, labels)
+        batch_state, _ = env.reset(batch_size, x, labels, self.training)
         done = np.zeros(batch_size, dtype=int)
         out = [['fall11'] for _ in range(batch_size)]
         batch_reward = [0. for _ in range(batch_size)]
@@ -303,8 +303,8 @@ class SACD(nn.Module):
             batch_next_state, reward, done_t, _ = env.step(batch_size, batch_action)
 
             for i in range(batch_size):
-                if done[i] == 0 and batch_next_state[i].wnid != batch_state[i].wnid:
-                    if self.training:
+                if done[i] == 0:
+                    if self.training and batch_next_state[i].wnid != batch_state[i].wnid:
                         if batch_next_state[i].is_leaf():
                             fc_weight = np.zeros(x[i].shape)
                         else:
@@ -323,8 +323,7 @@ class SACD(nn.Module):
 
                     batch_reward[i] += reward[i]
                     out[i].append(batch_next_state[i].wnid)
-
-            done = done_t
+                    done[i] = done_t[i]
             batch_state = batch_next_state
 
         total_reward += sum(batch_reward)

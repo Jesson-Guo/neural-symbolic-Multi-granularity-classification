@@ -129,7 +129,7 @@ class DQN():
 
         total_reward = 0
         # TODO 固定初状态返回root节点，是否可以随机返回一个node？
-        batch_state, info = env.reset(batch_size, x, labels)
+        batch_state, info = env.reset(batch_size, x, labels, self.training)
         if self.training:
             for s, a, r, ns in info['init_buffer']:
                 self.store_transition(s, a, r, ns, mode=1)
@@ -153,8 +153,8 @@ class DQN():
             batch_next_state, reward, done_t, _ = env.step(batch_size, batch_action)
 
             for i in range(batch_size):
-                if done[i] == 0 and batch_next_state[i].wnid != batch_state[i].wnid:
-                    if self.training:
+                if done[i] == 0:
+                    if self.training and batch_next_state[i].wnid != batch_state[i].wnid:
                         if batch_next_state[i].is_leaf():
                             fc_weight = np.zeros(x[i].shape)
                         else:
@@ -169,8 +169,7 @@ class DQN():
 
                     batch_reward[i] += reward[i]
                     out[i].append(batch_next_state[i].wnid)
-
-            done = done_t
+                    done[i] = done_t[i]
             batch_state = batch_next_state
 
         total_reward += sum(batch_reward)
