@@ -13,44 +13,6 @@ node_hash = {}
 tree = None
 
 
-MODEL_FC_KEYS = (
-    "fc.weight",
-    "linear.weight",
-    "module.linear.weight",
-    "module.net.linear.weight",
-    "output.weight",
-    "module.output.weight",
-    "output.fc.weight",
-    "module.output.fc.weight",
-    "classifier.weight",
-    "model.last_layer.3.weight",
-)
-
-
-def get_weights_from_state_dict(state_dict):
-    fc = None
-    for key in MODEL_FC_KEYS:
-        if key in state_dict:
-            fc = state_dict[key].squeeze()
-            break
-    if fc is not None:
-        return fc.detach()
-
-
-def get_weights_from_checkpoint(checkpoint):
-    data = torch.load(checkpoint, map_location=torch.device("cpu"))
-
-    for key in ("net", "state_dict", "model"):
-        try:
-            state_dict = data[key]
-            break
-        except:
-            state_dict = data
-
-    fc = get_weights_from_state_dict(state_dict)
-    return fc
-
-
 # 决策树非叶节点用一个全连接层 或者 计算内积
 class InferTree(nn.Module):
     def __init__(self, num_classes, dim, criterion, lamb, device, ckpt) -> None:
@@ -69,11 +31,9 @@ class InferTree(nn.Module):
         self.depth = 0
         self.depth = self.__get_tree_depth()
 
-        weights = get_weights_from_checkpoint(ckpt)
-
         for i in range(self.depth):
             sub_node_classifier[i+1] = []
-        self.__build_tree(weights)
+        self.__build_tree()
 
         self.num_inner_node = 0
         # inner node 不考虑错误分类节点
@@ -98,12 +58,10 @@ class InferTree(nn.Module):
 
         return depth(tree, 1)
 
-    def __build_tree(self, weights):
+    def __build_tree(self):
         def build(node, layer):
             if node.is_leaf():
-                w = weights[get_value('label2id')[node.wnid], :]
-                node.set_weight(w)
-                return w
+                return 0
             layers = [
                 # nn.Conv2d(self.dim, self.dim, kernel_size=1, stride=1, padding=0, bias=False),
                 nn.Flatten(),
@@ -121,12 +79,9 @@ class InferTree(nn.Module):
             node.set_classifier(classifier)
             sub_node_classifier[node.layer].append(node)
 
-            w = torch.zeros(self.dim, dtype=torch.float32)
             for i in node.children.keys():
-                w += build(node.children[i], layer+1)
-            w /= len(node.children)
-            node.set_weight(w)
-            return w
+                build(node.children[i], layer+1)
+            return 0
 
         node = tree
         if node.is_leaf() or node == None:

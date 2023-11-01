@@ -5,19 +5,6 @@ import numpy as np
 import gym
 import copy
 
-# hyper-parameters
-BATCH_SIZE = 128
-LR = 0.01
-GAMMA = 0.90
-EPISILO = 0.9
-MEMORY_CAPACITY = 2000
-Q_NETWORK_ITERATION = 100
-
-env = gym.make("CartPole-v0")
-env = env.unwrapped
-NUM_ACTIONS = env.action_space.n
-NUM_STATES = env.observation_space.shape[0]
-# ENV_A_SHAPE = 0 if isinstance(env.action_space.sample(), int) else env.action_space.sample.shape
 
 class Net(nn.Module):
     """docstring for Net"""
@@ -41,7 +28,7 @@ class Net(nn.Module):
 
 class DQN():
     """docstring for DQN"""
-    def __init__(self, batch_size, num_states, num_actions, memory_capacity, episilon, lr, gamma, update_freq, device):
+    def __init__(self, arch, batch_size, num_states, num_actions, memory_capacity, episilon, lr, gamma, update_freq, device):
         super(DQN, self).__init__()
         self.batch_size = batch_size
         self.num_states = num_states
@@ -59,11 +46,14 @@ class DQN():
         self.target_net = Net(self.num_states, self.num_actions).to(self.device)
 
         self.learn_step_counter = 0
-        self.memory_counter = 0
+        self.memory_counter1 = 0
+        self.memory_counter2 = 0
         self.memory = np.zeros((self.memory_capacity, self.num_states * 2 + 2))
-        # why the NUM_STATE*2 +2
-        # When we store the memory, we put the state, action, reward and next_state in the memory
-        # here reward and action is a number, state is a ndarray
+
+        self.corr_replay = 500000
+        if arch == 'cifar10':
+            self.corr_replay = 485000
+
         self.optimizer = torch.optim.Adam(self.eval_net.parameters(), lr=self.lr)
         self.loss_func = nn.MSELoss()
 
@@ -88,18 +78,23 @@ class DQN():
             # action = action if ENV_A_SHAPE ==0 else action.reshape(ENV_A_SHAPE)
         return action
 
-    def store_transition(self, state, action, reward, next_state):
+    def store_transition(self, state, action, reward, next_state, mode=2):
         transition = np.hstack((state, [action, reward], next_state))
-        index = self.memory_counter % self.memory_capacity
-        self.memory[index, :] = transition
-        self.memory_counter += 1
+        if mode == 1:
+            index = self.memory_counter1 % self.corr_replay
+            self.memory[index, :] = transition
+            self.memory_counter1 += 1
+        else:
+            index = self.memory_counter2 % (self.memory_capacity - self.corr_replay) + self.corr_replay
+            self.memory[index, :] = transition
+            self.memory_counter2 += 1
 
     def learn(self):
         #update the parameters
         if self.training:
             if self.learn_step_counter % self.update_freq == 0:
                 self.target_net.load_state_dict(self.eval_net.state_dict())
-            self.learn_step_counter+=1
+            self.learn_step_counter += 1
 
             #sample batch from memory
             sample_index = np.random.choice(self.memory_capacity, self.batch_size)
@@ -134,7 +129,11 @@ class DQN():
 
         total_reward = 0
         # TODO 固定初状态返回root节点，是否可以随机返回一个node？
-        batch_state, _ = env.reset(batch_size, labels)
+        batch_state, info = env.reset(batch_size, x, labels)
+        if self.training:
+            for s, a, r, ns in info['init_buffer']:
+                self.store_transition(s, a, r, ns, mode=1)
+
         done = np.zeros(batch_size, dtype=int)
         out = [['fall11'] for _ in range(batch_size)]
         batch_reward = [0. for _ in range(batch_size)]
@@ -149,28 +148,31 @@ class DQN():
                 else:
                     fc_weight = batch_state[i].classifier.state_dict()['1.weight'].cpu().numpy()
                     fc_weight = fc_weight.mean(0)
-                temp[i] = np.concatenate((x[i], fc_weight), axis=None)
+                temp[i] = np.concatenate((fc_weight, x[i]), axis=None)
             batch_action = self.select_action(torch.as_tensor(temp, dtype=torch.float32))
-            batch_next_state, reward, done, _ = env.step(batch_size, batch_action)
+            batch_next_state, reward, done_t, _ = env.step(batch_size, batch_action)
 
             for i in range(batch_size):
-                if done[i] == 0:
-                    if batch_next_state[i].is_leaf():
-                        fc_weight = np.zeros(x[i].shape)
-                    else:
-                        fc_weight = batch_next_state[i].classifier.state_dict()['1.weight'].cpu().numpy()
-                        fc_weight = fc_weight.mean(0)
-                    next_temp = np.concatenate((x[i], fc_weight), axis=None)
-                    self.store_transition(temp[i], batch_action[i], reward[i], next_temp)
+                if done[i] == 0 and batch_next_state[i].wnid != batch_state[i].wnid:
+                    if self.training:
+                        if batch_next_state[i].is_leaf():
+                            fc_weight = np.zeros(x[i].shape)
+                        else:
+                            fc_weight = batch_next_state[i].classifier.state_dict()['1.weight'].cpu().numpy()
+                            fc_weight = fc_weight.mean(0)
+                        next_temp = np.concatenate((x[i], fc_weight), axis=None)
+                        self.store_transition(temp[i], batch_action[i], reward[i], next_temp, mode=2)
+
+                        if self.memory_counter1 >= self.corr_replay and self.memory_counter2 >= self.memory_capacity - self.corr_replay:
+                            dqn_loss += self.learn()
+                            cnt += 1
+
                     batch_reward[i] += reward[i]
                     out[i].append(batch_next_state[i].wnid)
 
-                    if self.training and self.memory_counter >= self.memory_capacity:
-                        dqn_loss += self.learn()
-                        cnt += 1
-
+            done = done_t
             batch_state = batch_next_state
-            
+
         total_reward += sum(batch_reward)
         dqn_loss = dqn_loss / cnt if cnt > 0 else dqn_loss
         return out, total_reward, dqn_loss

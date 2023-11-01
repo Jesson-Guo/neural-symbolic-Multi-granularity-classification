@@ -44,6 +44,10 @@ def main(args):
     else:
         model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=args.num_classes+1, arch=args.arch, use_cbam=args.use_cbam)
         args.dim = 512
+    
+    data = torch.load(args.ckpt, map_location=device)
+    state_dict = data['model']
+    model.load_state_dict(state_dict)
 
     # define optimizer
     optimizer = torch.optim.Adam(
@@ -169,16 +173,19 @@ def main(args):
     train_loader = create_dataloader(args, train_dataset, train_sampler, training=True)
     val_loader = create_dataloader(args, val_dataset, val_sampler, training=False)
 
-    label2id, lpaths, tree, node_dict = init_global(args, train_dataset.class_to_idx)
+    label2id, id2label, lpaths, tree, node_dict = init_global(args, train_dataset.class_to_idx)
     set_value('label2id', label2id)
+    set_value('id2label', id2label)
     set_value('lpaths', lpaths)
     set_value('tree', tree)
     set_value('node_dict', node_dict)
 
     infer_tree = InferTree(args.num_classes, args.dim, criterion, args.lamb, device, args.ckpt)
+    infer_tree.load_state_dict(data['inference'])
 
     env = TreeClassifyEnv(args.dim*2, args.env_decay)
     agent = DQN(
+        arch=args.arch,
         batch_size=256,
         num_states=env.observation_space.shape[0],
         num_actions=env.action_space.n,
@@ -189,10 +196,13 @@ def main(args):
         update_freq=100,
         device=device
     )
+    agent.eval_net.load_state_dict(data['dqn_eval'])
+    agent.target_net.load_state_dict(data['dqn_eval'])
     if args.agent == 'sac-d':
         agent = SACD(
             state_size=env.observation_space.shape[0],
             action_size=env.action_space.n,
+            capacity=args.cap,
             device=device
         )
 
@@ -204,15 +214,17 @@ def main(args):
 
         if train_sampler != None:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(train_loader, model, infer_tree, env, agent, optimizer, criterion, (losses, epoch), device)
+        # train_one_epoch(train_loader, model, infer_tree, env, agent, optimizer, criterion, (losses, epoch), device)
+        # scheduler.step()
+
+        train_rl(train_loader, model, infer_tree, env, agent, epoch, device)
 
         # Sets the learning rate to the initial LR decayed by 10 every 30 epochs
-        scheduler.step()
 
         if epoch % args.eval == 0:
             if val_sampler != None:
                 val_sampler.set_epoch(epoch)
-            acc, rl_acc = evaluate(val_loader, model, env, agent, infer_tree, device)
+            acc, rl_acc = evaluate(val_loader, model, env, agent, infer_tree, epoch, device)
             print(f'\
                 Epoch: [{epoch}][{args.epochs+1}]\t \
                 Loss: {losses.val}\t \
@@ -226,9 +238,14 @@ def main(args):
                 'losses': losses,
                 'optimizer' : optimizer.state_dict(),
                 'scheduler': scheduler.state_dict(),
-                'dqn_eval': agent.eval_net.state_dict(),
-                'dqn_target': agent.target_net.state_dict()
+                'inference': infer_tree.state_dict()
             }
+            if args.agent == 'dqn':
+                state['dqn_eval'] = agent.eval_net.state_dict()
+                state['dqn_target'] = agent.target_net.state_dict()
+            elif args.agent == 'sac-d':
+                state['sacd'] = agent.state_dict()
+
             if args.ngpu > 1:
                 state['model'] = model.module.state_dict()
             else:
@@ -258,7 +275,7 @@ if __name__ == "__main__":
     parser.add_argument('--data_path', type=str, default='.', help='dataset path')
     parser.add_argument('--arch', type=str, default='cifar10', help='dataset name')
     parser.add_argument('--model', type=str, default='resnet18', help='dataset name')
-    parser.add_argument('--agent', type=str, default='dqn', help='rl agent name')
+    parser.add_argument('--agent', type=str, default='sac-d', help='rl agent name')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('--num_classes', type=int, default=200, help='num of classes of dataset')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')

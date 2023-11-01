@@ -20,16 +20,16 @@ class Node(object):
         self.feature = None
         self.subid = {}
 
-    def node_distance(self, node):
-        lp1 = get_value('lpaths')[self.wnid]
-        lp2 = get_value('lpaths')[node.wnid]
+    def node_distance(self, node, label2id, lpaths):
+        lp1 = lpaths[label2id[self.wnid]]
+        lp2 = lpaths[label2id[node.wnid]]
 
         i, j = 0, 0
         while i < len(lp1) and j < len(lp2) and lp1[i] == lp2[j]:
             i += 1
             j += 1
 
-        return (len(lp1)-1-i) + (len(lp2)-1-j)
+        return (len(lp1)-i) + (len(lp2)-j)
 
     def update_child(self, node):
         self.children[self.nchild] = node

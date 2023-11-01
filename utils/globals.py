@@ -1,3 +1,4 @@
+import copy
 from src.hierarchy import get_full_hierarchy, Node
 
 
@@ -31,6 +32,7 @@ def init_global(args, class_to_idx):
     words = {}
     wnids = []
     label2id = {}
+    id2label = {}
     lpaths = {}
     if args.arch == 'cifar10' or args.arch == 'cifar100':
         wnids = open(args.wnids, 'r')
@@ -42,10 +44,12 @@ def init_global(args, class_to_idx):
             words[line[0]] = line[1]
         for wnid in wnids:
             label2id[wnid] = class_to_idx[words[wnid]] + 1
+            id2label[class_to_idx[words[wnid]] + 1] = wnid
     elif args.arch == 'tiny-imagenet' or args.arch == 'imagenet':
         for k, v in class_to_idx.items():
             wnids.append(k)
             label2id[k] = v + 1
+            id2label[v+1] = k
 
     # init label2id and lpaths
     index = args.num_classes + 1
@@ -56,8 +60,18 @@ def init_global(args, class_to_idx):
             node = node.parent
             if node.wnid not in label2id.keys():
                 label2id[node.wnid] = index
+                id2label[index] = node.wnid
                 index += 1
             lpaths[label2id[wnid]].insert(0, label2id[node.wnid])
+    
+    lpaths_copy = copy.deepcopy(lpaths)
+    for k, lp in lpaths.items():
+        i = 1
+        for v in lp:
+            if v not in lpaths:
+                lpaths_copy[v] = lpaths[k][:i]
+            i += 1
+    lpaths = lpaths_copy
 
     # init tree
     node_dict = {}
@@ -79,4 +93,4 @@ def init_global(args, class_to_idx):
                 temp.update_child(leaf)
                 leaf.parent = temp
                 break
-    return label2id, lpaths, node_dict['fall11'], node_dict
+    return label2id, id2label, lpaths, node_dict['fall11'], node_dict
