@@ -183,7 +183,11 @@ class ResNet(nn.Module):
         self.groups = groups
         self.base_width = width_per_group
 
-        layer0 = [nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)]
+        layer0 = [
+            nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False),
+            norm_layer(self.inplanes),
+            nn.ReLU(inplace=True),
+        ]
         if arch == 'imagenet' or arch == 'tiny-imagenet':
             layer0 = [
                 nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False),
@@ -197,7 +201,7 @@ class ResNet(nn.Module):
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2, dilate=replace_stride_with_dilation[1], use_cbam=use_cbam)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2], use_cbam=use_cbam)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+        # self.fc = nn.Linear(512 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -285,10 +289,10 @@ class ResNet(nn.Module):
         # ImageNet 需要maxpool
         x = self.avgpool(x)
         # F.avg_pool2d(x, 4)
-        out = torch.flatten(x, 1)
-        out = self.fc(out)
+        # out = torch.flatten(x, 1)
+        # out = self.fc(out)
 
-        return out, x
+        return x
 
 
 def resnet18(use_cbam) -> ResNet:

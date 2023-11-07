@@ -90,14 +90,6 @@ class InferTree(nn.Module):
         build(node, 1)
         return node
 
-    def cross_entrophy(self, x, target, mode='prob'):
-        x = torch.log(x)
-        '''对输入的target标签进行one-hot编码, 使用scatter方法'''
-        target = torch.zeros(x.shape, device=target.device).scatter_(1, torch.unsqueeze(target, dim=1), 1)
-        loss = -target * x
-        loss = loss.sum(dim=1).mean()
-        return loss
-
     def forward(self, x, labels):
         penalty = torch.tensor(0.0).to(self.device)
         out = torch.zeros([x.shape[0], self.num_classes+1], dtype=torch.float32).to(self.device)
@@ -118,14 +110,14 @@ class InferTree(nn.Module):
                 # penalty += self.criterion(sub_output, sub_labels) * self.penalty_list[l]
                 penalty += self.criterion(sub_output, sub_labels) / l
 
-                # prob = torch.softmax(sub_output, dim=1)
+                prob = torch.softmax(sub_output, dim=1)
                 for i, child in node.children.items():
                     child.prob = sub_output[:, i+1]
-                    child.path_prob = sub_output[:, i+1] * node.path_prob
+                    child.path_prob = prob[:, i+1] * node.path_prob
                     # 有些子节点出现在了不同的分支下
                     if child.is_leaf():
                         idx = get_value('label2id')[child.wnid]
-                        out[:, idx] += child.prob
+                        out[:, idx] += child.path_prob
 
         return out[:, 1:], penalty
 

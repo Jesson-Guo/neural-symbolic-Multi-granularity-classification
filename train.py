@@ -11,16 +11,17 @@ def train_rl(dataloader, model, infer_tree, env, agent, epoch, device):
     agent.train()
     start = time.time()
     for i, (x, targets) in enumerate(dataloader):
-        # if i > 200:
+        # if i > 20:
         #     break
         x = torch.autograd.Variable(x)
         x = x.to(device)
 
         targets += 1
 
-        out, x = model(x)
-        out, loss = infer_tree.forward(x, targets)
-        _, total_reward, dqn_loss = agent.run_batch(x, env, targets)
+        # with torch.no_grad():
+        x = model(x)
+        out, loss = infer_tree(x, targets)
+        _, total_reward, dqn_loss = agent(x, env, targets)
 
         end = time.time()
         print(f'\
@@ -50,12 +51,14 @@ def train_one_epoch(dataloader, model, infer_tree, env, agent, optimizer, criter
         targets += 1
 
         # out = torch.autograd.Variable(out)
-        out, x = model(x)
+        for param in model.parameters():
+            a = param
+        x = model(x)
         # TODO 是否考虑原始resnet的loss ？
         # loss = criterion(out, labels)
 
         # inference
-        out, loss = infer_tree.forward(x, targets)
+        out, loss = infer_tree(x, targets)
         # loss += infer_tree.cross_entrophy(out, labels, mode='prob')
         loss += criterion(out, labels)
 
@@ -63,8 +66,8 @@ def train_one_epoch(dataloader, model, infer_tree, env, agent, optimizer, criter
         dqn_loss = 0
         # 应该先在buffer里添加一些正确的行为
         # sacd actor loss 是负的
-        if epoch > 0:
-            _, total_reward, dqn_loss = agent.run_batch(x, env, targets)
+        if epoch > 100:
+            _, total_reward, dqn_loss = agent(x, env, targets)
 
         his.update(loss.item(), x.shape[0])
 

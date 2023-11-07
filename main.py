@@ -13,10 +13,12 @@ import torchvision.transforms as transforms
 from torch.utils.data.distributed import DistributedSampler
 
 from utils.globals import *
+from utils.conf import is_main_process
 from src.resnet import *
 from src.dataset import TinyImagenet200, Imagenet1000, create_dataloader
 from src.hierarchy import *
 from src.tree import InferTree
+from src.loss import PsychoCrossEntropy
 from rl.env import TreeClassifyEnv
 from rl.agents.DQN import DQN
 from rl.agents.sacd import SACD
@@ -37,48 +39,7 @@ def main(args):
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
-    # use resnet18
-    if args.model == 'resnet50':
-        model = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=args.num_classes+1, arch=args.arch, use_cbam=args.use_cbam)
-        args.dim = 2048
-    else:
-        model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=args.num_classes+1, arch=args.arch, use_cbam=args.use_cbam)
-        args.dim = 512
-    
-    data = torch.load(args.ckpt, map_location=device)
-    state_dict = data['model']
-    model.load_state_dict(state_dict)
-
-    # define optimizer
-    optimizer = torch.optim.Adam(
-        model.parameters(),
-        lr=args.lr,
-        weight_decay=args.weight_decay
-    )
-    scheduler = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
-
-    criterion = nn.CrossEntropyLoss()
-
-    model.to(device)
-    if args.ngpu > 1:
-        # model = nn.DataParallel(model, device_ids=list(range(args.ngpu)))
-        # RuntimeError: Expected to have finished reduction in the prior iteration before starting a new one.
-        # This error indicates that your module has parameters that were not used in producing loss. 
-        # You can enable unused parameter detection by passing the keyword argument `find_unused_parameters=True` to `torch.nn.parallel.DistributedDataParallel`, 
-        # and by making sure all `forward` function outputs participate in calculating loss.
-        model = nn.parallel.DistributedDataParallel(
-            model,
-            device_ids=[args.local_rank],
-            output_device=args.local_rank,
-            # find_unused_parameters=True
-        )
-
-    # 程序在开始时花费一点额外时间，为整个网络的每个卷积层搜索最适合它的卷积实现算法，进而实现网络的加速。
-    # 适用场景是网络结构固定（不是动态变化的），网络的输入形状（包括 batch size，图片大小，输入的通道）是不变的
-    cudnn.benchmark = True
-
     # data loading
-
     train_dataset = None
     val_dataset = None
     if args.arch == "cifar10":
@@ -180,8 +141,35 @@ def main(args):
     set_value('tree', tree)
     set_value('node_dict', node_dict)
 
-    infer_tree = InferTree(args.num_classes, args.dim, criterion, args.lamb, device, args.ckpt)
-    infer_tree.load_state_dict(data['inference'])
+    # use resnet18
+    if args.model == 'resnet50':
+        model = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=args.num_classes+1, arch=args.arch, use_cbam=args.use_cbam)
+        args.dim = 2048
+    else:
+        model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=args.num_classes+1, arch=args.arch, use_cbam=args.use_cbam)
+        args.dim = 512
+
+    if args.resume:
+        data = torch.load(args.ckpt, map_location=device)
+        model.load_state_dict(data['model'])
+
+    # define optimizer
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=args.lr,
+        weight_decay=args.weight_decay
+    )
+    scheduler = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+    criterion = PsychoCrossEntropy(args.num_classes)
+    # criterion = nn.CrossEntropyLoss()
+
+    model.to(device)
+
+    # 程序在开始时花费一点额外时间，为整个网络的每个卷积层搜索最适合它的卷积实现算法，进而实现网络的加速。
+    # 适用场景是网络结构固定（不是动态变化的），网络的输入形状（包括 batch size，图片大小，输入的通道）是不变的
+    cudnn.benchmark = True
+
+    infer_tree = InferTree(args.num_classes, args.dim, nn.CrossEntropyLoss(), args.lamb, device, args.ckpt)
 
     env = TreeClassifyEnv(args.dim*2, args.env_decay)
     agent = DQN(
@@ -196,8 +184,6 @@ def main(args):
         update_freq=100,
         device=device
     )
-    agent.eval_net.load_state_dict(data['dqn_eval'])
-    agent.target_net.load_state_dict(data['dqn_eval'])
     if args.agent == 'sac-d':
         agent = SACD(
             state_size=env.observation_space.shape[0],
@@ -206,30 +192,66 @@ def main(args):
             device=device
         )
 
+    start_epoch = 1
+    losses = AverageMeter()
+    if args.resume:
+        infer_tree.load_state_dict(data['inference'])
+        agent.load_state_dict(data['agent'])
+        optimizer.load_state_dict(data['optimizer'])
+        scheduler.load_state_dict(data['scheduler'])
+        start_epoch = data['epoch'] + 1
+        losses = data['losses']
+
+    if args.ngpu > 1:
+        # model = nn.DataParallel(model, device_ids=list(range(args.ngpu)))
+        # RuntimeError: Expected to have finished reduction in the prior iteration before starting a new one.
+        # This error indicates that your module has parameters that were not used in producing loss. 
+        # You can enable unused parameter detection by passing the keyword argument `find_unused_parameters=True` to `torch.nn.parallel.DistributedDataParallel`, 
+        # and by making sure all `forward` function outputs participate in calculating loss.
+        model = nn.parallel.DistributedDataParallel(
+            model,
+            device_ids=[args.local_rank],
+            output_device=args.local_rank,
+            # find_unused_parameters=True
+        )
+        # infer_tree = nn.parallel.DistributedDataParallel(
+        #     infer_tree,
+        #     device_ids=[args.local_rank],
+        #     output_device=args.local_rank,
+        #     # find_unused_parameters=True
+        # )
+        agent = nn.parallel.DistributedDataParallel(
+            agent,
+            device_ids=[args.local_rank],
+            output_device=args.local_rank,
+            # find_unused_parameters=True
+        )
+
     best_acc = 0
 
     # training
-    for epoch in range(1, args.epochs+1):
-        losses = AverageMeter()
-
+    for epoch in range(start_epoch, args.epochs+1):
         if train_sampler != None:
             train_sampler.set_epoch(epoch)
-        # train_one_epoch(train_loader, model, infer_tree, env, agent, optimizer, criterion, (losses, epoch), device)
-        # scheduler.step()
+        train_one_epoch(train_loader, model, infer_tree, env, agent, optimizer, criterion, (losses, epoch), device)
+        scheduler.step()
 
-        train_rl(train_loader, model, infer_tree, env, agent, epoch, device)
+        # train_rl(train_loader, model, infer_tree, env, agent, epoch, device)
 
         # Sets the learning rate to the initial LR decayed by 10 every 30 epochs
 
         if epoch % args.eval == 0:
             if val_sampler != None:
                 val_sampler.set_epoch(epoch)
+            eval_time = time.time()
             acc, rl_acc = evaluate(val_loader, model, env, agent, infer_tree, epoch, device)
+            eval_time = time.time() - eval_time
             print(f'\
                 Epoch: [{epoch}][{args.epochs+1}]\t \
                 Loss: {losses.val}\t \
                 acc: {acc}\t \
-                rl acc: {rl_acc}')
+                rl acc: {rl_acc}\t \
+                time: {eval_time}')
             # remember best model and save checkpoint
             is_best = rl_acc > best_acc
             best_acc = max(rl_acc, best_acc)
@@ -240,20 +262,19 @@ def main(args):
                 'scheduler': scheduler.state_dict(),
                 'inference': infer_tree.state_dict()
             }
-            if args.agent == 'dqn':
-                state['dqn_eval'] = agent.eval_net.state_dict()
-                state['dqn_target'] = agent.target_net.state_dict()
-            elif args.agent == 'sac-d':
-                state['sacd'] = agent.state_dict()
 
             if args.ngpu > 1:
                 state['model'] = model.module.state_dict()
+                state['agent'] = agent.module.state_dict()
             else:
                 state['model'] = model.state_dict()
-            filename='./checkpoints/%s_checkpoint.pt'%args.prefix
+                state['agent'] = agent.state_dict()
+
+            filename=f'./checkpoints/{args.prefix}_checkpoint_{args.local_rank}.pt'
+            # if is_main_process():
             torch.save(state, filename)
             if is_best:
-                shutil.copyfile(filename, './checkpoints/%s_model_best.pt'%args.prefix)
+                shutil.copyfile(filename, f'./checkpoints/{args.prefix}_model_best_{args.local_rank}.pt')
 
     print("***** TRAINING OVER *****")
 
@@ -262,6 +283,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tiny imagenet training')
     parser.add_argument('--seed', type=int, default=72, help='random seed')
     parser.add_argument('--epochs', type=int, default=50, help='number of epochs to train')
+    parser.add_argument('--resume', type=int, default=0, help='number of epochs to train')
     parser.add_argument('--use_cbam', type=bool, default=True, help='use cbam or not')
     parser.add_argument('--lamb', type=float, default=1e-3, help='coefficient of the regularization term')
     parser.add_argument('--lr', type=float, default=1e-4, help='initial learning rate')
