@@ -2,7 +2,6 @@ import argparse
 import os
 import random
 import shutil
-import copy
 
 import torch
 import torchvision
@@ -12,25 +11,24 @@ import torch.optim.lr_scheduler as lr_scheduler
 import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
 from torch.utils.data.distributed import DistributedSampler
-# from torchvision.models.resnet import resnet50
-from torchvision.models.detection import FasterRCNN, fasterrcnn_resnet50_fpn
-from torchvision.models.detection.rpn import AnchorGenerator
-from torchvision.models.detection.backbone_utils import _resnet_fpn_extractor
-from torchvision.ops import MultiScaleRoIAlign, misc
 
-# from src.resnet import *
+from utils.globals import *
+from utils.conf import is_main_process
 from src.resnet import *
-from src.dataset import TinyImagenetDataset
+from src.dataset import TinyImagenet200, Imagenet1000, create_dataloader
 from src.hierarchy import *
-from engine.symbolic_engine import *
+from src.tree import InferTree
+from src.loss import PsychoCrossEntropy
 from train import *
 from evaluate import *
 
 
 def main(args):
+    init()
     torch.manual_seed(args.seed)
-    # torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
     random.seed(args.seed)
+    args.start_epoch = 0
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if args.local_rank != -1:
@@ -38,53 +36,119 @@ def main(args):
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
-    # device = torch.device("cpu")
+    # data loading
+    train_dataset = None
+    val_dataset = None
+    if args.arch == "cifar10":
+        train_dataset = torchvision.datasets.CIFAR10(
+            root=args.data_path,
+            train=True,
+            transform=transforms.Compose([
+                transforms.RandomCrop(32, 4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            ])
+        )
+        val_dataset = torchvision.datasets.CIFAR10(
+            root=args.data_path,
+            train=False,
+            transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            ])
+        )
+    elif args.arch == "cifar100":
+        train_dataset = torchvision.datasets.CIFAR100(
+            root=args.data_path,
+            train=True,
+            transform=transforms.Compose([
+                transforms.RandomCrop(32, 4),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            ])
+        )
+        val_dataset = torchvision.datasets.CIFAR100(
+            root=args.data_path,
+            train=False,
+            transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            ])
+        )
+    elif args.arch == "tiny-imagenet":
+        train_dataset = TinyImagenet200(
+            root=args.data_path,
+            image_size=64,
+            transform=transforms.Compose([
+                transforms.RandomCrop(64, 8),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.4802, 0.4481, 0.3975), (0.2302, 0.2265, 0.2262)),
+            ]),
+            train=True
+        )
+        val_dataset = TinyImagenet200(
+            root=args.data_path,
+            image_size=64,
+            transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Normalize((0.4802, 0.4481, 0.3975), (0.2302, 0.2265, 0.2262)),
+            ]),
+            train=False
+        )
+    elif args.arch == "imagenet":
+        train_dataset = Imagenet1000(
+            root=args.data_path,
+            image_size=224,
+            transform=transforms.Compose([
+                transforms.RandomResizedCrop(224),
+                transforms.RandomHorizontalFlip(),
+                transforms.ToTensor(),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            ]),
+            train=True
+        )
+        val_dataset = Imagenet1000(
+            root=args.data_path,
+            image_size=224,
+            transform=transforms.Compose([
+                transforms.Resize(224 + 32),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            ]),
+            train=False
+        )
 
-    # returned layers和anchor_sizes的大小需要相互对应
-    num_classes = 200
-    trainable_layers = 5
-    returned_layers = [1, 2, 3, 4]
+    train_sampler = None
+    val_sampler = None
+    if args.ngpu > 1:
+        train_sampler = DistributedSampler(train_dataset)
+        val_sampler = DistributedSampler(val_dataset)
 
-    # backbone = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=num_classes, use_cbam=args.use_cbam)
-    # fpn = _resnet_fpn_extractor(backbone, trainable_layers, returned_layers)
-    backbone = ResNetFPN(Bottleneck, [3, 4, 6, 3], num_classes=num_classes, use_cbam=args.use_cbam)
-    model = FeatureNet(backbone, in_planes=256)
+    train_loader = create_dataloader(args, train_dataset, train_sampler, training=True)
+    val_loader = create_dataloader(args, val_dataset, val_sampler, training=False)
 
-    # define symbolic inference module
-    wnids = open(os.path.join(args.data, 'wnids.txt'), 'r')
-    wnids = ''.join(wnids.readlines()).split()
+    label2id, id2label, lpaths, tree, node_dict = init_global(args, train_dataset.class_to_idx)
+    set_value('label2id', label2id)
+    set_value('id2label', id2label)
+    set_value('lpaths', lpaths)
+    set_value('tree', tree)
+    set_value('node_dict', node_dict)
 
-    tree, dic = get_full_hierarchy(args.hier)
-    pruning_count(tree, wnids)
-    pruning(tree)
+    # use resnet18
+    if args.model == 'resnet50':
+        model = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=args.num_classes+1, arch=args.arch, use_cbam=args.use_cbam)
+        args.dim = 2048
+    else:
+        model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=args.num_classes+1, arch=args.arch, use_cbam=args.use_cbam)
+        args.dim = 512
 
-    lpaths = {}
-    label2id = {}
-    index = 1
-    for wnid in wnids:
-        label2id[wnid] = index
-        index += 1
-        node = dic[wnid]
-        lpaths[label2id[wnid]] = []
-        while node.parent != None:
-            node = node.parent
-            if node.id not in label2id.keys():
-                label2id[node.id] = index
-                index += 1
-            lpaths[label2id[wnid]].append(label2id[node.id])
-
-    f_info = open(args.info, 'rb')
-    info = pickle.load(f_info)
-    f_info.close()
-
-    miu = {}
-    sigma = {}
-    for k in info.keys():
-        miu[k] = info[k]['mean']
-        sigma[k] = info[k]['std']
-
-    inference = SymbolicInference(tree, miu, sigma, lpaths, label2id)
-    # model = NSMG(backbone, inference)
+    if args.resume:
+        data = torch.load(args.ckpt, map_location=device)
+        model.load_state_dict(data['model'])
 
     # define optimizer
     optimizer = torch.optim.Adam(
@@ -93,8 +157,23 @@ def main(args):
         weight_decay=args.weight_decay
     )
     scheduler = lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+    criterion = PsychoCrossEntropy(args.num_classes)
 
     model.to(device)
+
+    # 程序在开始时花费一点额外时间，为整个网络的每个卷积层搜索最适合它的卷积实现算法，进而实现网络的加速。
+    # 适用场景是网络结构固定（不是动态变化的），网络的输入形状（包括 batch size，图片大小，输入的通道）是不变的
+    cudnn.benchmark = True
+
+    infer_tree = InferTree(args.arch, args.num_classes, args.dim, criterion, args.lamb, device)
+    if args.resume:
+        infer_tree.load_state_dict(data['inference'])
+        # agent.load_state_dict(data['agent'])
+        # optimizer.load_state_dict(data['optimizer'])
+        # scheduler.load_state_dict(data['scheduler'])
+        # args.start_epoch = data['epoch'] + 1
+        # set_value('tree', data['tree'])
+
     if args.ngpu > 1:
         # model = nn.DataParallel(model, device_ids=list(range(args.ngpu)))
         # RuntimeError: Expected to have finished reduction in the prior iteration before starting a new one.
@@ -108,96 +187,60 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    # 程序在开始时花费一点额外时间，为整个网络的每个卷积层搜索最适合它的卷积实现算法，进而实现网络的加速。
-    # 适用场景是网络结构固定（不是动态变化的），网络的输入形状（包括 batch size，图片大小，输入的通道）是不变的
-    cudnn.benchmark = True
-
-    # data loading
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-
-    train_dataset = TinyImagenetDataset(
-        os.path.join(args.data, 'train'),
-        64,
-        label2id,
-        transforms.Compose([
-            # transforms.RandomResizedCrop(32),
-            # transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            normalize,
-        ])
-    )
-    train_sampler = None
-    if args.ngpu > 1:
-        train_sampler = DistributedSampler(train_dataset)
-    print(train_sampler)
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        sampler=train_sampler,
-        batch_size=args.batch_size,
-        shuffle=(train_sampler is None),
-        num_workers=args.workers,
-        pin_memory=True
-    )
-
-    val_dataset = TinyImagenetDataset(
-        os.path.join(args.data, 'val'),
-        64,
-        label2id,
-        transforms.Compose([
-            # transforms.Resize(32),
-            transforms.ToTensor(),
-            normalize,
-        ])
-    )
-    val_sampler = None
-    if args.ngpu > 1:
-        val_sampler = DistributedSampler(train_dataset)
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset,
-        sampler=val_sampler,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.workers,
-        pin_memory=True
-    )
-    # evaluate once
-    # if 1:
-    #     evaluate(val_loader, model, inference, lpaths, args.conf, device)
-
     best_acc = 0
 
     # training
-    for epoch in range(1, args.epochs+1):
-        losses = AverageMeter()
-
+    train_losses = torch.zeros((args.epochs+1))
+    train_accs = torch.zeros((args.epochs+1, 2))
+    eval_losses = torch.zeros((args.epochs+1))
+    eval_accs = torch.zeros((args.epochs+1, 2))
+    for epoch in range(args.start_epoch, args.epochs):
         if train_sampler != None:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(train_loader, model, inference, optimizer, (losses, epoch), device)
+        train_loss, train_acc = train_one_epoch(
+            train_loader, model, infer_tree, optimizer, criterion, epoch, device)
+        train_losses[epoch] = train_loss
+        train_accs[epoch] = train_acc
+        scheduler.step()
 
         # Sets the learning rate to the initial LR decayed by 10 every 30 epochs
-        scheduler.step()
 
         if epoch % args.eval == 0:
             if val_sampler != None:
                 val_sampler.set_epoch(epoch)
-            acc = evaluate(val_loader, model, inference, lpaths, args.conf, device)
+            eval_loss, eval_acc = evaluate(val_loader, model, infer_tree, criterion, epoch, device)
+            eval_losses[epoch] = eval_loss
+            eval_accs[epoch] = eval_acc
             # remember best model and save checkpoint
-            is_best = acc > best_acc
-            best_acc = max(acc, best_acc)
+            is_best = eval_acc[0].item() > best_acc
+            best_acc = max(eval_acc[0].item(), best_acc)
+
             state = {
                 'epoch': epoch,
-                'best_acc': best_acc,
+                'tree': get_value('tree'),
                 'optimizer' : optimizer.state_dict(),
-                'scheduler': scheduler.state_dict()
+                'scheduler': scheduler.state_dict(),
+                'inference': infer_tree.state_dict(),
             }
+
             if args.ngpu > 1:
                 state['model'] = model.module.state_dict()
             else:
                 state['model'] = model.state_dict()
-            filename='./checkpoints/%s_checkpoint.pt'%args.prefix
-            torch.save(state, filename)
-            if is_best:
-                shutil.copyfile(filename, './checkpoints/%s_model_best.pt'%args.prefix)
+
+            if is_main_process():
+                filename=f'./checkpoints/{args.prefix}_checkpoint_{args.local_rank}.pt'
+                torch.save(state, filename)
+                if is_best:
+                    shutil.copyfile(filename, f'./checkpoints/{args.prefix}_model_best_{args.local_rank}.pt')
+
+    status = {
+        'train_loss': train_losses,
+        'train_acc': train_accs,
+        'eval_loss': eval_losses,
+        'eval_acc': eval_accs,
+    }
+    torch.save(status, f'./checkpoints/{args.prefix}_status.pt')
 
     print("***** TRAINING OVER *****")
 
@@ -206,20 +249,32 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='tiny imagenet training')
     parser.add_argument('--seed', type=int, default=72, help='random seed')
     parser.add_argument('--epochs', type=int, default=50, help='number of epochs to train')
+    parser.add_argument('--resume', type=int, default=0, help='number of epochs to train')
     parser.add_argument('--use_cbam', type=bool, default=True, help='use cbam or not')
-    parser.add_argument('--lr', type=float, default=0.1, help='initial learning rate')
+    parser.add_argument('--lamb', type=float, default=1e-3, help='coefficient of the regularization term')
+    parser.add_argument('--lr', type=float, default=1e-4, help='initial learning rate')
+    parser.add_argument('--dqn_lr', type=float, default=1e-4, help='initial dqn learning rate')
+    parser.add_argument('--env_decay', type=float, default=0.99, help='initial dqn learning rate')
+    parser.add_argument('--cap', type=int, default=100000, help='initial memory capacity')
+    parser.add_argument('--eps', type=float, default=0.005, help='initial learning rate')
+    parser.add_argument('--gamma', type=float, default=0.99, help='initial learning rate')
     parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
     parser.add_argument('--weight-decay', type=float, default=1e-4, help='weight-decay')
-    parser.add_argument('--data', type=str, default='.', help='dataset path')
+    parser.add_argument('--data_path', type=str, default='.', help='dataset path')
+    parser.add_argument('--arch', type=str, default='cifar10', help='dataset name')
+    parser.add_argument('--model', type=str, default='resnet18', help='dataset name')
+    parser.add_argument('--agent', type=str, default='sac-d', help='rl agent name')
     parser.add_argument('--batch_size', type=int, default=32, help='batch size')
+    parser.add_argument('--num_classes', type=int, default=200, help='num of classes of dataset')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--prefix', type=str, default='test', help='prefix for logging & checkpoint saving')
     parser.add_argument('--ngpu', type=int, default=8, help='numbers of gpu to use')
-    parser.add_argument('--eval', type=int, default=5, help='numbers of epochs to eval model during training')
+    parser.add_argument('--eval', type=int, default=1, help='numbers of epochs to eval model during training')
     parser.add_argument('--local_rank', default=os.getenv('LOCAL_RANK', -1), type=int)
+    parser.add_argument('--ckpt', type=str, default='', help='wnids file path')
     parser.add_argument('--wnids', type=str, default='', help='wnids file path')
+    parser.add_argument('--words', type=str, default='', help='words file path')
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
-    parser.add_argument('--info', type=str, default='./images_info.pkl', help='images info path')
     parser.add_argument('--conf', type=float, default=0.4, help='confidence to accept the predicted label')
 
     args = parser.parse_args()

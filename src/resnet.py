@@ -1,11 +1,7 @@
-from typing import Any, Callable, List, Optional, Type, Union, Dict
-import math
-
+from typing import Callable, List, Optional, Type, Union
 import torch
 import torch.nn as nn
 from torch import Tensor
-
-from model.attention.CBAM import CBAMBlock
 
 
 def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, dilation: int = 1) -> nn.Conv2d:
@@ -58,11 +54,6 @@ class BasicBlock(nn.Module):
         self.downsample = downsample
         self.stride = stride
 
-        if use_cbam:
-            self.cbam = CBAMBlock(channel=planes,reduction=16,kernel_size=7)
-        else:
-            self.cbam = None
-    
     def forward(self, x: Tensor) -> Tensor:
         # identity: 残差
         identity = x
@@ -73,10 +64,6 @@ class BasicBlock(nn.Module):
 
         out = self.conv2(out)
         out = self.bn2(out)
-
-        # apply CBAM on the convolution outputs in each block
-        if not self.cbam is None:
-            out = self.cbam(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -117,11 +104,6 @@ class Bottleneck(nn.Module):
         self.downsample = downsample
         self.stride = stride
 
-        if use_cbam:
-            self.cbam = CBAMBlock(channel=planes*4,reduction=16,kernel_size=7)
-        else:
-            self.cbam = None
-    
     def forward(self, x: Tensor) -> Tensor:
         identity = x
 
@@ -135,10 +117,6 @@ class Bottleneck(nn.Module):
 
         out = self.conv3(out)
         out = self.bn3(out)
-
-        # apply CBAM on the convolution outputs in each block
-        if not self.cbam is None:
-            out = self.cbam(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
@@ -160,6 +138,7 @@ class ResNet(nn.Module):
         width_per_group: int = 64,
         replace_stride_with_dilation: Optional[List[bool]] = None,
         norm_layer: Optional[Callable[..., nn.Module]] = None,
+        arch: str = 'imagenet',
         use_cbam: bool = False,
     ) -> None:
         super().__init__()
@@ -182,16 +161,25 @@ class ResNet(nn.Module):
         self.groups = groups
         self.base_width = width_per_group
 
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
-        self.bn1 = norm_layer(self.inplanes)
-        self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        layer0 = [
+            nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False),
+            norm_layer(self.inplanes),
+            nn.ReLU(inplace=True),
+        ]
+        if arch == 'imagenet' or arch == 'tiny-imagenet':
+            layer0 = [
+                nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False),
+                norm_layer(self.inplanes),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+            ]
+        self.layer0 = nn.Sequential(*layer0)
         self.layer1 = self._make_layer(block, 64, layers[0], use_cbam=use_cbam)
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2, dilate=replace_stride_with_dilation[0], use_cbam=use_cbam)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2, dilate=replace_stride_with_dilation[1], use_cbam=use_cbam)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2], use_cbam=use_cbam)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+        # self.fc = nn.Linear(512 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -210,21 +198,6 @@ class ResNet(nn.Module):
                 elif isinstance(m, BasicBlock) and m.bn2.weight is not None:
                     nn.init.constant_(m.bn2.weight, 0)  # type: ignore[arg-type]
 
-        '''
-        init.kaiming_normal(self.fc.weight)
-        for key in self.state_dict():
-            if key.split('.')[-1]=="weight":
-                if "conv" in key:
-                    init.kaiming_normal(self.state_dict()[key], mode='fan_out')
-                if "bn" in key:
-                    if "SpatialGate" in key:
-                        self.state_dict()[key][...] = 0
-                    else:
-                        self.state_dict()[key][...] = 1
-            elif key.split(".")[-1]=='bias':
-                self.state_dict()[key][...] = 0
-        '''
-    
     def _make_layer(
         self,
         block: Type[Union[BasicBlock, Bottleneck]],
@@ -270,12 +243,7 @@ class ResNet(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x: Tensor) -> Tensor:
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-        # ImageNet 需要maxpool
-        x = self.maxpool(x)
-
+        x = self.layer0(x)
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
@@ -283,266 +251,27 @@ class ResNet(nn.Module):
 
         # ImageNet 需要maxpool
         x = self.avgpool(x)
-        # F.avg_pool2d(x, 4)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
+        # x = torch.flatten(x, 1)
+        # x = self.fc(x)
 
         return x
 
 
-class ResNetFPN(nn.Module):
-    def __init__(
-        self,
-        block: Type[Union[BasicBlock, Bottleneck]],
-        layers: List[int],
-        num_classes: int = 1000,
-        scale=1,
-        use_cbam: bool = False,
-    ) -> None:
-        super().__init__()
-
-        self.inplanes = 64
-        self.pyramid_channels = 256
-
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
-        self.bn1 = nn.BatchNorm2d(self.inplanes)
-        self.relu1 = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-
-        self.layer1 = self._make_layer(block, 64, layers[0], use_cbam=use_cbam)
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=2, use_cbam=use_cbam)
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2, use_cbam=use_cbam)
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2, use_cbam=use_cbam)
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-
-        # top layers
-        self.toplayer = nn.Conv2d(2048, 256, kernel_size=1, stride=1, padding=0)  # Reduce channels
-        self.toplayer_bn = nn.BatchNorm2d(256)
-        self.toplayer_relu = nn.ReLU(inplace=True)
-
-        # Smooth layers
-        self.smooth1 = nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
-        self.smooth1_bn = nn.BatchNorm2d(256)
-        self.smooth1_relu = nn.ReLU(inplace=True)
-
-        self.smooth2 = nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
-        self.smooth2_bn = nn.BatchNorm2d(256)
-        self.smooth2_relu = nn.ReLU(inplace=True)
-
-        self.smooth3 = nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1)
-        self.smooth3_bn = nn.BatchNorm2d(256)
-        self.smooth3_relu = nn.ReLU(inplace=True)
-
-        # Lateral layers
-        self.latlayer1 = nn.Conv2d(1024, 256, kernel_size=1, stride=1, padding=0)
-        self.latlayer1_bn = nn.BatchNorm2d(256)
-        self.latlayer1_relu = nn.ReLU(inplace=True)
-
-        self.latlayer2 = nn.Conv2d(512, 256, kernel_size=1, stride=1, padding=0)
-        self.latlayer2_bn = nn.BatchNorm2d(256)
-        self.latlayer2_relu = nn.ReLU(inplace=True)
-
-        self.latlayer3 = nn.Conv2d(256, 256, kernel_size=1, stride=1, padding=0)
-        self.latlayer3_bn = nn.BatchNorm2d(256)
-        self.latlayer3_relu = nn.ReLU(inplace=True)
-
-        self.conv2 = nn.Conv2d(1024, 256, kernel_size=3, stride=1, padding=1)
-        self.bn2 = nn.BatchNorm2d(256)
-        self.relu2 = nn.ReLU(inplace=True)
-        self.conv3 = nn.Conv2d(256, num_classes, kernel_size=1, stride=1, padding=0)
-
-        # feature selection layer
-        self.select_head = nn.Sequential(
-            nn.Conv2d(256, 10, kernel_size=3, stride=1, padding=1)
-        )
-
-        self.scale = scale
-
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-                m.weight.data.normal_(0, math.sqrt(2. / n))
-            elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-
-    def _make_layer(
-        self,
-        block: Type[Union[BasicBlock, Bottleneck]],
-        planes: int,
-        blocks: int,
-        stride: int = 1,
-        use_cbam: bool = False,
-    ) -> nn.Sequential:
-        downsample = None
-        if stride != 1 or self.inplanes != planes * block.expansion:
-            downsample = nn.Sequential(
-                conv1x1(self.inplanes, planes * block.expansion, stride),
-                nn.BatchNorm2d(planes * block.expansion),
-            )
-
-        layers = []
-        layers.append(
-            block(self.inplanes, planes, stride, downsample, use_cbam=use_cbam)
-        )
-        self.inplanes = planes * block.expansion
-        for _ in range(1, blocks):
-            layers.append(
-                block(self.inplanes, planes, use_cbam=use_cbam)
-            )
-
-        return nn.Sequential(*layers)
-    
-    def _upsample(self, x, y, scale=1):
-        _, _, H, W = y.size()
-        return nn.functional.upsample(x, size=(H // scale, W // scale), mode='bilinear')
-
-    def _upsample_add(self, x, y):
-        _, _, H, W = y.size()
-        return nn.functional.upsample(x, size=(H, W), mode='bilinear') + y
-
-    def forward(self, x: Tensor) -> Tensor:
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu1(x)
-        x = self.maxpool(x)
-
-        x = self.layer1(x)
-        c2 = x
-        x = self.layer2(x)
-        c3 = x
-        x = self.layer3(x)
-        c4 = x
-        x = self.layer4(x)
-        c5 = x
-
-        # Top-down
-        p5 = self.toplayer(c5)
-        p5 = self.toplayer_relu(self.toplayer_bn(p5))
-
-        c4 = self.latlayer1(c4)
-        c4 = self.latlayer1_relu(self.latlayer1_bn(c4))
-        p4 = self._upsample_add(p5, c4)
-        p4 = self.smooth1(p4)
-        p4 = self.smooth1_relu(self.smooth1_bn(p4))
-
-        c3 = self.latlayer2(c3)
-        c3 = self.latlayer2_relu(self.latlayer2_bn(c3))
-        p3 = self._upsample_add(p4, c3)
-        p3 = self.smooth2(p3)
-        p3 = self.smooth2_relu(self.smooth2_bn(p3))
-
-        c2 = self.latlayer3(c2)
-        c2 = self.latlayer3_relu(self.latlayer3_bn(c2))
-        p2 = self._upsample_add(p3, c2)
-        p2 = self.smooth3(p2)
-        p2 = self.smooth3_relu(self.smooth3_bn(p2))
-
-        p3 = self._upsample(p3, p2)
-        p4 = self._upsample(p4, p2)
-        p5 = self._upsample(p5, p2)
-
-        # p5 = self.avgpool(p5)
-
-        # x = torch.cat((p2, p3, p4, p5), 1)
-        # x = self.conv2(x)
-        # x = self.relu2(self.bn2(x))
-        # x = self.conv3(x)
-        # x = self._upsample(x, x, scale=self.scale)
-
-        return {'0': p2, '1': p3, '2': p4, '3': p5}
+# def resnet18(use_cbam) -> ResNet:
+#     return ResNet(BasicBlock, [2, 2, 2, 2], use_cbam=use_cbam)
 
 
-class FeatureNet(nn.Module):
-    def __init__(
-        self,
-        fpn: nn.Module,
-        in_planes: int = 256,
-    ) -> None:
-        super().__init__()
-        self.fpn = fpn
-        
-        # feature selection
-        self.select1 = nn.Sequential(
-            conv3x3(in_planes, out_planes=32, stride=1),
-            conv1x1(32, 1)
-        )
-        self.select2 = nn.Sequential(
-            conv3x3(in_planes, out_planes=32, stride=1),
-            conv1x1(32, 1)
-        )
-        self.select3 = nn.Sequential(
-            conv3x3(in_planes, out_planes=32, stride=1),
-            conv1x1(32, 1)
-        )
-        self.select4 = nn.Sequential(
-            conv3x3(in_planes, out_planes=32, stride=1),
-            conv1x1(32, 1)
-        )
-        self.fc1 = nn.Linear(256, 1)
-        self.fc2 = nn.Linear(256, 1)
-        self.fc3 = nn.Linear(256, 1)
-        self.fc4 = nn.Linear(256, 1)
-        self.select = {
-            '0': self.select1,
-            '1': self.select2,
-            '2': self.select3,
-            '3': self.select4
-        }
-        self.fc = {
-            '0': self.fc1,
-            '1': self.fc2,
-            '2': self.fc3,
-            '3': self.fc4
-        }
-
-    def forward(self, x: Tensor) -> Dict[str, Tensor]:
-        batch_size = x.shape[0]
-        pyramids = self.fpn(x)
-        feat_dict = {}
-        for k in pyramids.keys():
-            feat_dict[k] = self.select[k](pyramids[k]).reshape((batch_size, -1))
-            feat_dict[k] = self.fc[k](feat_dict[k])
-
-        return feat_dict
+# def resnet34(use_cbam) -> ResNet:
+#     return ResNet(BasicBlock, [3, 4, 6, 3], use_cbam=use_cbam)
 
 
-class NSMG(nn.Module):
-    def __init__(
-        self,
-        backbone: nn.Module = None,
-        inference: nn.Module = None
-    ) -> None:
-        super().__init__()
-        self.backbone = backbone
-        self.inference = inference
-
-    def forward(
-        self,
-        x: Tensor,
-        targets: Dict = None
-    ):
-        feat = self.backbone(x)
-        feat_list = [feat['0'], feat['1'], feat['2'], feat['3']]
-        loss = self.inference(feat_list, targets['labels'])
-        return loss
+# def resnet50(use_cbam) -> ResNet:
+#     return ResNet(Bottleneck, [3, 4, 6, 3], use_cbam=use_cbam)
 
 
-def resnet18(use_cbam) -> ResNet:
-    return ResNet(BasicBlock, [2, 2, 2, 2], use_cbam=use_cbam)
+# def resnet101(use_cbam) -> ResNet:
+#     return ResNet(Bottleneck, [3, 4, 23, 3], use_cbam=use_cbam)
 
 
-def resnet34(use_cbam) -> ResNet:
-    return ResNet(BasicBlock, [3, 4, 6, 3], use_cbam=use_cbam)
-
-
-def resnet50(use_cbam) -> ResNet:
-    return ResNet(Bottleneck, [3, 4, 6, 3], use_cbam=use_cbam)
-
-
-def resnet101(use_cbam) -> ResNet:
-    return ResNet(Bottleneck, [3, 4, 23, 3], use_cbam=use_cbam)
-
-
-def resnet152(use_cbam) -> ResNet:
-    return ResNet(Bottleneck, [3, 8, 36, 3], use_cbam=use_cbam)
+# def resnet152(use_cbam) -> ResNet:
+#     return ResNet(Bottleneck, [3, 8, 36, 3], use_cbam=use_cbam)

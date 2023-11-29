@@ -17,13 +17,6 @@ from torchvision.models.detection.backbone_utils import _resnet_fpn_extractor
 from src.resnet import *
 
 
-def visualize_box(img, bbox):
-    for i in range(bbox.shape[0]):
-        x_min, y_min, x_max, y_max = bbox[i].numpy().reshape((4))
-        cv2.rectangle(img, (int(x_min), int(y_min)), (int(x_max), int(y_max)), color=(0,255,0))
-    return img
-
-
 @torch.no_grad()
 def test(model, test_path, batch, device):
     test_path = os.path.join(test_path, 'test')

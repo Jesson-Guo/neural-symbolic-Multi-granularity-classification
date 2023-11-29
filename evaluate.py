@@ -1,38 +1,52 @@
+import time
 import torch
+import torch.distributed
 import progressbar
-import copy
 
-from src.utils import *
+from utils.util import *
+from utils.globals import *
+from utils.conf import is_main_process
 
 
-@torch.no_grad()
-def evaluate(dataloader, model, inference, lpaths, conf, device):
+def evaluate(dataloader, model, infer_tree, criterion, epoch, device):
     model.eval()
-    inference.eval()
-    accuracy = AverageMeter()
-    bar = progressbar.ProgressBar(0, len(dataloader))
+    eval_loss = AverageMeter()
+    acc = torch.zeros(2).to(device)
 
-    # for images, labels, boxes in dataloader:
-    for i, (x, targets) in enumerate(dataloader):
-        x = torch.autograd.Variable(x)
-        x = x.to(device)
-        labels = targets['labels']
-        labels = labels.to(device)
+    if is_main_process():
+        bar = progressbar.ProgressBar(0, len(dataloader))
+    start = time.time()
 
-        feat = model(x)
-        feat_list = [feat['0'], feat['1'], feat['2'], feat['3']]
-        out = inference.infer(feat_list, device=device)
+    with torch.no_grad():
+        for i, (x, targets) in enumerate(dataloader):
+            x = x.to(device)
+            labels = targets.to(device)
+            targets += 1
 
-        for k in range(len(out)):
-            infer_path, diffs = out[k]
-            gt_path = copy.deepcopy(lpaths[labels[k].item()])
-            gt_path.reverse()
-            for j in range(min(len(gt_path), len(infer_path))):
-                if infer_path[j] != gt_path[j] or diffs[j] < conf:
-                    break
-            accuracy.update(j/(len(gt_path)-1.0))
-            del gt_path
+            x = model(x)
+            out, loss = infer_tree(x, targets)
+            loss += criterion(out, labels)
 
-        bar.update(i)
+            acc1, acc2 = accuracy(out, labels, topk=(1, 2))
+            acc[0] += acc1
+            acc[1] += acc2
 
-    return accuracy.avg
+            torch.distributed.barrier()
+            reduced_loss = reduce_mean(loss)
+            eval_loss.update(reduced_loss.item(), x.shape[0])
+
+            if is_main_process():
+                bar.update(i+1)
+
+    torch.distributed.barrier()
+    end = time.time()
+    acc = reduce_mean(acc, average=False)
+    acc = acc / len(dataloader.dataset)
+    if is_main_process():
+        print(f'\
+            Epoch: [{epoch+1}]\t \
+            eval top1: {acc[0].item()}\t \
+            eval top2: {acc[1].item()}\t \
+            time: {end - start}')
+
+    return eval_loss.avg, acc
