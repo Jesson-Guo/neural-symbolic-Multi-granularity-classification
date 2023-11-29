@@ -43,7 +43,4 @@ def evaluate(dataloader, model, env, agent, infer_tree, epoch, device):
 
         bar.update(i+1)
 
-    acc = acc / len(dataloader.dataset)
-    rl_acc = rl_acc / len(dataloader.dataset)
-
     return acc, rl_acc

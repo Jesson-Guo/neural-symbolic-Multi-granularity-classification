@@ -198,7 +198,7 @@ def main(args):
         infer_tree.load_state_dict(data['inference'])
         agent.load_state_dict(data['agent'])
         optimizer.load_state_dict(data['optimizer'])
-        scheduler.load_state_dict(data['scheduler'])
+        # scheduler.load_state_dict(data['scheduler'])
         start_epoch = data['epoch'] + 1
         losses = data['losses']
 
@@ -245,6 +245,8 @@ def main(args):
                 val_sampler.set_epoch(epoch)
             eval_time = time.time()
             acc, rl_acc = evaluate(val_loader, model, env, agent, infer_tree, epoch, device)
+            acc = acc / (len(val_loader.dataset) / args.ngpu)
+            rl_acc = rl_acc / (len(val_loader.dataset) / args.ngpu)
             eval_time = time.time() - eval_time
             print(f'\
                 Epoch: [{epoch}][{args.epochs+1}]\t \
