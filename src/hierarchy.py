@@ -14,11 +14,11 @@ class Node(object):
         self.ncount= 0 # num of ImageNet1K children
         self.weight = None
         self.classifier = None
-        self.env = None
+        self.weight = None
         self.agent = None
-        self.prob = None
+        self.sub_prob = None
+        self.decay = None
         self.path_prob = None
-        self.feature = None
         self.subid = {}
 
     def node_distance(self, node, label2id, lpaths):
@@ -31,6 +31,22 @@ class Node(object):
             j += 1
 
         return (len(lp1)-i) + (len(lp2)-j)
+
+    def choose_child(self, i):
+        if self.parent == None:
+            prob = self.sub_prob[i, 1:]
+            for k, v in self.children.items():
+                if not v.is_leaf():
+                    prob[k] *= v.decay[i].item()
+            pred = prob.reshape(1, -1).max(1)[1].item()
+            return pred + 1
+        else:
+            prob = self.sub_prob[i]
+            for k, v in self.children.items():
+                if not v.is_leaf():
+                    prob[k] *= v.decay[i].item()
+            pred = prob.reshape(1, -1).max(1)[1].item()
+            return pred
 
     def update_child(self, node):
         self.children[self.nchild] = node

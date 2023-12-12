@@ -140,10 +140,10 @@ def main(args):
 
     # use resnet18
     if args.model == 'resnet50':
-        model = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=args.num_classes+1, arch=args.arch, use_cbam=args.use_cbam)
+        model = ResNet(Bottleneck, [3, 4, 6, 3], num_classes=args.num_classes, arch=args.arch, use_cbam=args.use_cbam)
         args.dim = 2048
     else:
-        model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=args.num_classes+1, arch=args.arch, use_cbam=args.use_cbam)
+        model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=args.num_classes, arch=args.arch, use_cbam=args.use_cbam)
         args.dim = 512
 
     if args.resume:
@@ -165,14 +165,20 @@ def main(args):
     # 适用场景是网络结构固定（不是动态变化的），网络的输入形状（包括 batch size，图片大小，输入的通道）是不变的
     cudnn.benchmark = True
 
+    train_losses = torch.zeros((args.epochs+1))
+    train_accs = torch.zeros((args.epochs+1, 2))
+    eval_losses = torch.zeros((args.epochs+1))
+    eval_accs = torch.zeros((args.epochs+1, 2))
     infer_tree = InferTree(args.arch, args.num_classes, args.dim, criterion, args.lamb, device)
     if args.resume:
         infer_tree.load_state_dict(data['inference'])
-        # agent.load_state_dict(data['agent'])
+        # train_losses = data['train_loss']
+        # train_accs = data['train_acc']
+        # eval_losses = data['eval_loss']
+        # eval_accs = data['eval_acc']
         # optimizer.load_state_dict(data['optimizer'])
         # scheduler.load_state_dict(data['scheduler'])
         # args.start_epoch = data['epoch'] + 1
-        # set_value('tree', data['tree'])
 
     if args.ngpu > 1:
         # model = nn.DataParallel(model, device_ids=list(range(args.ngpu)))
@@ -190,15 +196,10 @@ def main(args):
     best_acc = 0
 
     # training
-    train_losses = torch.zeros((args.epochs+1))
-    train_accs = torch.zeros((args.epochs+1, 2))
-    eval_losses = torch.zeros((args.epochs+1))
-    eval_accs = torch.zeros((args.epochs+1, 2))
     for epoch in range(args.start_epoch, args.epochs):
         if train_sampler != None:
             train_sampler.set_epoch(epoch)
-        train_loss, train_acc = train_one_epoch(
-            train_loader, model, infer_tree, optimizer, criterion, epoch, device)
+        train_loss, train_acc = train_one_epoch(train_loader, model, infer_tree, optimizer, criterion, epoch, device)
         train_losses[epoch] = train_loss
         train_accs[epoch] = train_acc
         scheduler.step()
@@ -221,6 +222,10 @@ def main(args):
                 'optimizer' : optimizer.state_dict(),
                 'scheduler': scheduler.state_dict(),
                 'inference': infer_tree.state_dict(),
+                'train_loss': train_losses,
+                'train_acc': train_accs,
+                'eval_loss': eval_losses,
+                'eval_acc': eval_accs,
             }
 
             if args.ngpu > 1:
@@ -229,18 +234,11 @@ def main(args):
                 state['model'] = model.state_dict()
 
             if is_main_process():
-                filename=f'./checkpoints/{args.prefix}_checkpoint_{args.local_rank}.pt'
+                filename=f'./checkpoints/hard/{args.prefix}_checkpoint_{args.local_rank}.pt'
+                # if is_main_process():
                 torch.save(state, filename)
                 if is_best:
-                    shutil.copyfile(filename, f'./checkpoints/{args.prefix}_model_best_{args.local_rank}.pt')
-
-    status = {
-        'train_loss': train_losses,
-        'train_acc': train_accs,
-        'eval_loss': eval_losses,
-        'eval_acc': eval_accs,
-    }
-    torch.save(status, f'./checkpoints/{args.prefix}_status.pt')
+                    shutil.copyfile(filename, f'./checkpoints/hard/{args.prefix}_model_best_{args.local_rank}.pt')
 
     print("***** TRAINING OVER *****")
 

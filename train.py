@@ -31,8 +31,8 @@ def train_one_epoch(dataloader, model, infer_tree, optimizer, criterion, epoch, 
         # loss = criterion(out, labels)
 
         # inference
-        out, loss = infer_tree(x, targets)
-        loss += criterion(out, labels)
+        out = infer_tree(x, targets)
+        loss = criterion(out, labels)
 
         acc1, acc2 = accuracy(out, labels, topk=(1, 2))
         acc[0] += acc1

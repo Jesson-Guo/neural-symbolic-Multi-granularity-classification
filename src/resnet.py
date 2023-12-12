@@ -251,7 +251,7 @@ class ResNet(nn.Module):
 
         # ImageNet 需要maxpool
         x = self.avgpool(x)
-        # x = torch.flatten(x, 1)
+        x = torch.flatten(x, 1)
         # x = self.fc(x)
 
         return x

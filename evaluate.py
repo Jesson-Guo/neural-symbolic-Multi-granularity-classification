@@ -24,8 +24,18 @@ def evaluate(dataloader, model, infer_tree, criterion, epoch, device):
             targets += 1
 
             x = model(x)
-            out, loss = infer_tree(x, targets)
-            loss += criterion(out, labels)
+            out = infer_tree(x, targets)
+            loss = criterion(out, labels)
+
+            # pred = infer_tree.infer_hard(x)
+            # pred = pred.t()
+            # correct = pred.eq(labels.view(1, -1).expand_as(pred)).contiguous()
+
+            # res = []
+            # for k in (1, 2):
+            #     correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            #     res.append(correct_k.item())
+            # acc1, acc2 = res
 
             acc1, acc2 = accuracy(out, labels, topk=(1, 2))
             acc[0] += acc1

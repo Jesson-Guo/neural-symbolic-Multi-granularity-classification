@@ -55,10 +55,10 @@ class InferTree(nn.Module):
 
     def __build_tree(self):
         def build(node, layer):
+            node.set_weight(torch.rand(1, self.dim).to(self.device))
             node.set_layer(layer)
             layers = [
                 # nn.Conv2d(self.dim, self.dim, kernel_size=1, stride=1, bias=False),
-                nn.Flatten(),
                 nn.Linear(self.dim, node.num_child()+1)
             ]
             # 增加一个类别表示分类错误（需要返回到父节点）？，
@@ -87,7 +87,8 @@ class InferTree(nn.Module):
             for node in nodes:
                 if node.is_leaf():
                     continue
-                sub_output = node.classifier(x)
+                x_t = x + node.weight.expand_as(x)
+                sub_output = node.classifier(x_t)
                 prob = torch.softmax(sub_output, dim=1)
                 # sub_labels = []
                 # for label in labels.cpu().numpy():
@@ -101,6 +102,7 @@ class InferTree(nn.Module):
                 # penalty += self.criterion(prob, sub_labels, len(node.children)+1) / l
 
                 node.sub_prob = copy.copy(prob).data
+                node.decay = torch.ones((x.shape[0], 1)).to(self.device)
                 for i, child in node.children.items():
                     # child.prob = sub_output[:, i+1]
                     child.path_prob = prob[:, i+1] * node.path_prob
@@ -108,22 +110,60 @@ class InferTree(nn.Module):
                         idx = get_value('label2id')[child.wnid]
                         out[:, idx] += child.path_prob
 
-        return out[:, 1:], penalty
-
-    def infer(self, x):
-        out = torch.zeros([x.shape[0], self.num_classes+1], dtype=torch.float32).to(self.device)
-
-        for l, nodes in inner_nodes.items():
-            for node in nodes:
-                if node.is_leaf():
-                    continue
-                sub_output = node.classifier(x)
-                prob = torch.softmax(sub_output, dim=1)
-                node.sub_prob = copy.copy(prob).data
-                for i, child in node.children.items():
-                    child.prob = prob[:, i+1]
-                    child.path_prob = prob[:, i+1] * node.path_prob
-                    if child.is_leaf():
-                        idx = get_value('label2id')[child.wnid]
-                        out[:, idx] += child.path_prob
         return out[:, 1:]
+
+    def infer_hard(self, x):
+        out = torch.zeros([x.shape[0], 2], dtype=torch.float32).to(self.device)
+
+        for i in range(x.shape[0]):
+            node = inner_nodes[1][0]
+            path = [node.wnid]
+            while not node.is_leaf():
+                pred = node.choose_child(i)
+                if pred == 0:
+                    p = node.parent
+                    for k, v in p.children.items():
+                        if v.wnid == node.wnid:
+                            break
+                    p.sub_prob[i][k+1] = 0
+                    node = p
+                else:
+                    node = node.children[pred-1]
+                path.append(node.wnid)
+            out[i][0] = label2id[path[-1]] - 1
+
+            while node.parent != None:
+                p = node.parent
+                for k, v in p.children.items():
+                    if v.wnid == node.wnid:
+                        break
+                if node.is_leaf():
+                    p.decay[i] = 1 - p.sub_prob[i][k+1]
+                    p.sub_prob[i][k+1] = 0
+                else:
+                    p.decay[i] = 1 - p.sub_prob[i][k+1] * (1 - node.decay[i])
+                node = p
+
+            # second infer
+            node = inner_nodes[1][0]
+            sec_path = [node.wnid]
+            while not node.is_leaf():
+                for k, v in node.children.items():
+                    if v.is_leaf():
+                        node.sub_prob[i][k+1] *= 1
+                    else:
+                        node.sub_prob[i][k+1] *= v.decay[i].item()
+                pred = node.choose_child(i)
+                if pred == 0:
+                    p = node.parent
+                    for k, v in p.children.items():
+                        if v.wnid == node.wnid:
+                            break
+                    p.sub_prob[i][k+1] = 0
+                    node = p
+                else:
+                    node = node.children[pred-1]
+                sec_path.append(node.wnid)
+            out[i][1] = label2id[sec_path[-1]] - 1
+
+        return out

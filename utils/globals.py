@@ -116,4 +116,14 @@ def init_global(args, class_to_idx):
             i += 1
     lpaths = lpaths_copy
 
-    return label2id, id2label, lpaths, node_dict['fall11'], node_dict
+    node_hash = {-1: 0}
+    for wnid, node in node_dict.items():
+        if not node.is_leaf():
+            node_hash[label2id[wnid]] = len(node.children) + 1
+    last_k = -1
+    for k, x in node_hash.items():
+        node_hash[k] = node_hash[last_k] + x
+        last_k = k
+    del node_hash[-1]
+
+    return label2id, id2label, lpaths, node_dict['fall11'], node_dict, node_hash, node_hash[last_k]
