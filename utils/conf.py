@@ -1,5 +1,4 @@
 import torch.distributed as dist
-import torch
 
 
 def is_dist_avail_and_initialized():

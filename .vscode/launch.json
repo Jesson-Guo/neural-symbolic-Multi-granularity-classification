@@ -5,21 +5,12 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            "name": "test",
             "type": "python",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "args": [
-                "--data=./tiny-imagenet-200",
-                "--epochs=50",
-                "--batch_size=1",
-                "--use_cbam=1",
-                "--ngpu=1",
-                "--prefix=RESNET50_TINY_IMAGENET_CBAM",
-                "-j=4"
-            ],
             "justMyCode": false
-        }
+        },
     ]
 }
