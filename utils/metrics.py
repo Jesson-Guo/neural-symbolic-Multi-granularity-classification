@@ -1,6 +1,18 @@
 import torch
 import torch.nn.functional as F
-from torchmetrics.clustering import DunnIndex
+from torchmetrics.clustering import DunnIndex, DaviesBouldinScore
+from pytorch_adapt.layers import SilhouetteScore
+
+
+def clusters_to_xy(cluster):
+    x, y = [], []
+    i = 0
+    for _, weights in cluster.items():
+        for w in weights:
+            x.append(w)
+            y.append(i)
+        i += 1
+    return x, y
 
 
 def kl_divergence(x, cluster, reduction='batchmean'):
@@ -21,16 +33,28 @@ def cosine_similarity(x, cluster):
     return cs
 
 
-def dunn_index(clusters, p=2):
-    data = []
-    labels = []
+def dunn_index(cluster, p=2):
+    x, y = clusters_to_xy(cluster)
+    di = DunnIndex(p=p)
+    out = di(x, y)
+    # 需要测试什么值是合适的
+    return out
 
-    i = 0
-    for _, ws in clusters.items():
-        for v in ws:
-            data.append(v)
-            labels.append(i)
 
-    data = torch.stack(data)
-    labels = torch.tensor(labels)
-    return DunnIndex(p=p)(data, labels)
+def silhouette_score(cluster):
+    x, y = clusters_to_xy(cluster)
+    ss = SilhouetteScore()
+    out = ss(x, y)
+
+    if out < -0.5:
+        return 0
+    elif out > 0.5:
+        return 2
+    else:
+        return 1
+
+
+def davies_bouldin_index(cluster):
+    x, y = clusters_to_xy(cluster)
+    dbi = DaviesBouldinScore()
+    return dbi(x, y)
