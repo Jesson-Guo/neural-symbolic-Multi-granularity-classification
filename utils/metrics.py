@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from torchmetrics.clustering import DunnIndex, DaviesBouldinScore
+from torchmetrics.clustering import DunnIndex, DaviesBouldinScore, CalinskiHarabaszScore
 from pytorch_adapt.layers import SilhouetteScore
 
 
@@ -37,7 +37,7 @@ def dunn_index(cluster, p=2):
     x, y = clusters_to_xy(cluster)
     di = DunnIndex(p=p)
     out = di(x, y)
-    # 需要测试什么值是合适的
+    # 越大越好
     return out
 
 
@@ -54,7 +54,15 @@ def silhouette_score(cluster):
         return 1
 
 
-def davies_bouldin_index(cluster):
+def db_index(cluster):
     x, y = clusters_to_xy(cluster)
     dbi = DaviesBouldinScore()
+    # 越大越好
+    return dbi(x, y)
+
+
+def ch_score(cluster):
+    x, y = clusters_to_xy(cluster)
+    dbi = CalinskiHarabaszScore()
+    # 越大越好
     return dbi(x, y)
