@@ -12,8 +12,9 @@ from functools import partial
 
 from src.dataloader import create_train_val_dataloader
 from src.node import build_tree
-from src.gpt import chatgpt
+from src.gpt import GPT
 from src.tot.infer import solve
+from src.tot.tot import ToT
 from utils import metrics
 from utils.conf import get_world_size
 
@@ -43,9 +44,11 @@ def main(args):
     tree, node_dict = build_tree(args, val_loader.dataset.class_to_idx, state_dict[''])
 
     client = openai.OpenAI()
-    gpt = partial(chatgpt, client=client, model=args.backend, temperature=args.temperature)
+    gpt = GPT(client, model=args.backend, temperature=args.temperature)
 
-    metrics_func = getattr(metrics, args.metrics)
+    sim_func = getattr(metrics, args.sim)
+    plan_func = getattr(metrics, args.plan)
+    tot = ToT(plan_func, sim_func)
 
     if get_world_size() > 1:
         model = nn.parallel.DistributedDataParallel(
@@ -55,7 +58,7 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    solve(model, val_loader, tree, node_dict, val_loader, gpt, metrics_func)
+    solve(model, val_loader, tree, node_dict, gpt, tot)
 
 
 if __name__ == "__main__":
@@ -71,7 +74,8 @@ if __name__ == "__main__":
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
     parser.add_argument('--backend', type=str, default='gpt-3.5-turbo', help='gpt model')
-    parser.add_argument('--metrics', type=str, default='kl_divergence', help='cluster metrics')
+    parser.add_argument('--sim', type=str, default='kl_divergence', help='similarity metrics')
+    parser.add_argument('--plan', type=str, default='kl_divergence', help='cluster metrics')
 
     args = parser.parse_args()
     main(args)

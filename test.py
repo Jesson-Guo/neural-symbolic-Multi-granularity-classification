@@ -2,15 +2,28 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torch
 import openai
+import os
+import numpy as np
+from torchmetrics.clustering import DunnIndex
 
-from src.gpt import chatgpt
+from src.gpt import GPT
 
-prompt = '''Giving 4 plans to divide the following labels into 2 categories.
-Input: 'airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck'
+
+prompt = '''
+Giving 2 plans to divide the INPUT into 2 categories with title in one word or one phrase.
+INPUT: 'airplane', 'bird', 'cat', 'dog'
 '''
-client = openai.OpenAI()
-res = chatgpt(client, prompt, model='gpt-3.5-turbo', temperature=0.7, max_tokens=1000, n=1, stop=None)
-print(res)
+# client = openai.OpenAI()
+# res = chatgpt(client, 'say hello', model='gpt-3.5-turbo', temperature=0.7, max_tokens=1000, n=1, stop=None)
+# print(res)
+# completion = client.chat.completions.create(
+#     model="gpt-3.5-turbo",
+#     messages=[
+#         {"role": "user", "content": prompt}
+#     ]
+# )
+
+print()
 
 '''Giving 4 plans to divide the following labels into 2 categories.
 Input: 'motor vehicle', 'craft', 'placental', 'bird'
@@ -35,3 +48,36 @@ Give me 4 plans to divide the following 10 words into two categories and give th
 airplane, automobile, bird, cat, deer, dog, frog, horse, ship, truck
 '''
 
+'''
+'Plan 1: Dividing Labels Based on Natural Habitat
+Category 1: Animals\n- Bird\n- Cat\n- Dog\n\nCategory 2: Man-Made Objects\n- Airplane
+Plan 2: Dividing Labels Based on Movement Ability
+Category 1: Animals\n- Bird\n- Cat\n- Dog\n\nCategory 2: Modes of Transportation\n- Airplane'
+'''
+
+labels = ['airplane', 'bird', 'cat', 'dog']
+s = "" + f"'{labels[0]}'"
+for i in range(1, len(labels)):
+    s += f", '{labels[i]}'"
+
+a = torch.tensor([1., 1.])
+b = torch.tensor([2., 2.])
+c = (a + b) / 2
+d = torch.stack([a, b]).mean(dim=0)
+
+plans = []
+contents = ['Plan 1:\nCategory 1: Animals\n- Bird\n- Cat\n- Dog\n\nCategory 2: Transportation\n- Airplane\n\nPlan 2:\nCategory 1: Animals\n- Bird\n- Cat\n- Dog\n\nCategory 2: Flying Objects\n- Airplane']
+for content in contents:
+    content = content.replace('\n', ' ').strip()
+    content = content.split('Plan')[1:]
+    for plan in content:
+        categories = plan.split('Category')[1:]
+        c = {}
+        for item in categories:
+            item = item.split('-')
+            name = item[0].split(':')[-1].strip()
+            c[name] = []
+            for l in item[1:]:
+                c[name].append(l.strip())
+        plans.append(c)
+print(plans)

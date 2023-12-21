@@ -1,7 +1,8 @@
-from src.tot.tot import Thought
+from src.tot.tot import ToT
+from src.gpt import GPT
 
 
-def solve(model, dataloader, tree, node_dict, val_loader, gpt, metrics_func):
+def solve(model, dataloader, node_dict, label_to_wnid, label_to_id, gpt: GPT, tot: ToT):
     inner_nodes = {}
     leaves = []
     for node in node_dict.values():
@@ -12,8 +13,10 @@ def solve(model, dataloader, tree, node_dict, val_loader, gpt, metrics_func):
             inner_nodes[node.layer] = []
         inner_nodes[node.layer].append(node)
 
-    root = Thought(labels=leaves, feedback=None, parent=None)
-
-    for i, (x, targets) in enumerate(dataloader):
+    for idx, (x, targets) in enumerate(dataloader):
         x = model.forward_features(x)
         x = model.forward_head(x, pre_logits=False)
+
+        for i in range(x.shape[0]):
+            output, _ = tot.solve(x, dataloader.dataset.labels, node_dict, label_to_wnid, gpt, method='bfs')
+            output = label_to_id[output]
