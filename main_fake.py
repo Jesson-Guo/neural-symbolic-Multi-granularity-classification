@@ -64,7 +64,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='image classification with gpt')
 
     parser.add_argument('--local_rank', default=os.getenv('LOCAL_RANK', -1), type=int)
-    parser.add_argument('--epochs', type=int, default=50, help='number of epochs to train')
     parser.add_argument('--seed', type=int, default=72, help='random seed')
     parser.add_argument('--model', type=str, default='vit_base_patch16_224.orig_in21k_ft_in1k', help='model name')
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
