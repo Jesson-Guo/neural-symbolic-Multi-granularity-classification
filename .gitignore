@@ -163,3 +163,4 @@ cython_debug/
 .DS_Store
 .vscode/
 weights/
+../structure_released.xml
