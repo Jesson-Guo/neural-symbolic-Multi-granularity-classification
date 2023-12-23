@@ -10,7 +10,7 @@ class GPT(object):
         client: OpenAI,
         model: str = 'gpt-3.5-turbo',
         temperature: float = 0.7,
-        max_tokens: int = 1000
+        max_tokens: int = 5000
     ) -> None:
         self.client = client
         self.model = model
@@ -39,7 +39,7 @@ class GPT(object):
         return outputs
 
 
-class FakeGPT(object):
+class FakeGPT(GPT):
     fake_label = '''\n- {label}'''
     fake_cat = '''Category {num}: {name}{cat}'''
     fake_plan = '''Plan {num}:{plan}'''
@@ -56,16 +56,22 @@ class FakeGPT(object):
         self.temperature = temperature
         self.max_tokens = max_tokens
 
-    def generate(self, labels, n=1, stop=None):
-        l1 = self.fake_label.format(label=labels[0])
-        l2 = ""
-        for i in range(1, len(labels)):
+    def generate(self, prompt, n=1, stop=None):
+        labels = prompt.split('INPUT:')[1].strip()
+        labels = labels.split(',')
+        for i in range(len(labels)):
+            labels[i] = str(labels[i]).split('"')[1].strip()
+        mid = len(labels) // 2
+        l1, l2 = "", ""
+        for i in range(0, mid):
+            l1 += self.fake_label.format(label=labels[i])
+        for i in range(mid, len(labels)):
             l2 += self.fake_label.format(label=labels[i])
 
         cat1 = self.fake_cat.format(num=1, name='A', cat=l1)
         cat2 = self.fake_cat.format(num=2, name='B', cat=l2)
 
-        plan1 = self.fake_plan.format(num=1, plan=cat1)
-        plan2 = self.fake_plan.format(num=2, plan=cat2)
+        plan1 = self.fake_plan.format(num=1, plan=cat1+'\n'+cat2)
+        plan2 = self.fake_plan.format(num=2, plan=cat1+'\n'+cat2)
 
         return [plan1+"\n\n"+plan2]

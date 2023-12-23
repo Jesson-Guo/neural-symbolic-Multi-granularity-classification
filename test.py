@@ -11,7 +11,7 @@ from src.gpt import GPT
 
 prompt = '''
 Giving 2 plans to divide the INPUT into 2 categories with title in one word or one phrase.
-INPUT: 'airplane', 'bird', 'cat', 'dog'
+INPUT: 'airplane.n.01', 'bird.n.01', 'cat.n.01', 'dog.n.01'
 '''
 # client = openai.OpenAI()
 # res = chatgpt(client, 'say hello', model='gpt-3.5-turbo', temperature=0.7, max_tokens=1000, n=1, stop=None)
@@ -55,29 +55,30 @@ Plan 2: Dividing Labels Based on Movement Ability
 Category 1: Animals\n- Bird\n- Cat\n- Dog\n\nCategory 2: Modes of Transportation\n- Airplane'
 '''
 
-labels = ['airplane', 'bird', 'cat', 'dog']
-s = "" + f"'{labels[0]}'"
-for i in range(1, len(labels)):
-    s += f", '{labels[i]}'"
+# labels = ['airplane', 'bird', 'cat', 'dog']
+# s = "" + f"'{labels[0]}'"
+# for i in range(1, len(labels)):
+#     s += f", '{labels[i]}'"
 
-a = torch.tensor([1., 1.])
-b = torch.tensor([2., 2.])
-c = (a + b) / 2
-d = torch.stack([a, b]).mean(dim=0)
+# a = torch.tensor([1., 1.])
+# b = torch.tensor([2., 2.])
+# c = (a + b) / 2
+# d = torch.stack([a, b]).mean(dim=0)
 
 plans = []
-contents = ['Plan 1:\nCategory 1: Animals\n- Bird\n- Cat\n- Dog\n\nCategory 2: Transportation\n- Airplane\n\nPlan 2:\nCategory 1: Animals\n- Bird\n- Cat\n- Dog\n\nCategory 2: Flying Objects\n- Airplane']
+contents = ["Plan 1:\nCategory 1: Animals\n- Bird.n.01\n- Cat's_kit.n.01\n- Dog.n.01\n\nCategory 2: Transportation\n- Airplane.n.01\n\nPlan 2:\nCategory 1: Animals\n- Bird.n.01\n- Cat's_kit.n.01\n- Dog.n.01\n\nCategory 2: Flying Objects\n- Airplane.n.01"]
 for content in contents:
     content = content.replace('\n', ' ').strip()
     content = content.split('Plan')[1:]
-    for plan in content:
-        categories = plan.split('Category')[1:]
+    for s in content:
+        categories = s.split('Category')[1:]
         c = {}
         for item in categories:
-            item = item.split('-')
+            item = item.split(' - ')
             name = item[0].split(':')[-1].strip()
             c[name] = []
             for l in item[1:]:
-                c[name].append(l.strip())
+                l = l.strip()
+                c[name].append(l)
         plans.append(c)
 print(plans)

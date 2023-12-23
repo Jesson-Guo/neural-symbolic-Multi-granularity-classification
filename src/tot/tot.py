@@ -34,7 +34,7 @@ class Thought(object):
                 categories = s.split('Category')[1:]
                 c, c_w = {}, {}
                 for item in categories:
-                    item = item.split('-')
+                    item = item.split(' - ')
                     name = item[0].split(':')[-1].strip()
                     c[name] = []
                     c_w[name] = []
@@ -48,8 +48,8 @@ class Thought(object):
 
     def estimate_plans(self, plans_w, func):
         result = []
-        for plan in plans_w:
-            out = func(plan)
+        for plan_w in plans_w:
+            out = func(plan_w)
             # out是2/1/0表示sure/likely/impossible，后续也可以比较启发式和最优的差别
             # 这里也可以考虑将index传给gpt让gpt评价（可尝试）
             result.append(out)
@@ -59,8 +59,8 @@ class Thought(object):
 
     def estimate_clusters(self, v, plan, plan_w, func):
         similarity = func(v, plan_w)
-        idx = np.array(similarity).argmin()
-        for name, _ in plan_w:
+        idx = similarity.argmin().item()
+        for name, _ in plan_w.items():
             if idx == 0:
                 break
             idx -= 1
@@ -70,7 +70,7 @@ class Thought(object):
 
 
 class ToT(object):
-    prompt_template = '''Giving {plans} plans to divide the INPUT into {categories} categories with title in one word or one phrase.
+    prompt_template = '''Giving {num_plans} plans to divide the INPUT into {num_categories} categories with title in one word or one phrase.
     INPUT: {input}
     '''
 
@@ -78,19 +78,20 @@ class ToT(object):
         self.plan_func = plan_func
         self.sim_func = sim_func
 
-    def construct_prompt(self, labels, p, c):
-        s = "" + f"'{labels[0]}'"
+    def construct_prompt(self, labels, num_plans=2, num_categories=2):
+        s = "" + f"\"{labels[0]}\""
         for i in range(1, len(labels)):
-            s += f", '{labels[i]}'"
-        prompt = self.prompt_template.format(plans=p, categories=c, input=s)
+            s += f", \"{labels[i]}\""
+        prompt = self.prompt_template.format(
+            num_plans=num_plans, num_categories=num_categories, input=s)
         return prompt
 
     def solve_once(self, v, node_dict, label_to_wnid, thought: Thought, gpt: GPT):
-        prompt = self.construct_prompt(thought.labels)
+        prompt = self.construct_prompt(thought.labels, num_plans=2, num_categories=2)
         contents = gpt.generate(prompt, n=1)
 
         plans, plans_w = thought.gen_plans(contents, node_dict, label_to_wnid)
-        result = thought.estimate_plans(plans, plans_w, self.plan_func)
+        result = thought.estimate_plans(plans_w, self.plan_func)
         for i in range(len(result)):
             name, labels = thought.estimate_clusters(v, plans[i], plans_w[i], self.sim_func)
             t = Thought(labels, result[i], thought, name)
@@ -111,8 +112,8 @@ class ToT(object):
                 name.append(t.labels[0])
                 break
             self.solve_once(v, node_dict, label_to_wnid, t, gpt)
-            for _, v in t.items():
-                thoughts.append(v)
+            for _, child in t.children.items():
+                thoughts.append(child)
         return name
 
     def solve(self, v, labels, node_dict, label_to_wnid, gpt: GPT, method='bfs'):
@@ -121,4 +122,4 @@ class ToT(object):
             output = self.bfs(v, node_dict, label_to_wnid, thought, gpt)
         elif method == 'dfs':
             output = self.bfs(v, node_dict, label_to_wnid, thought, gpt)
-        return output[-1], output
+        return output[-1], output, thought

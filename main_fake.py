@@ -31,19 +31,15 @@ def main(args):
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
-    model = timm.create_model(
-        model_name=args.model,
-        pretrained=True,
-        pretrained_cfg_overlay=dict(file=args.ckpt),
-    ).to(device)
+    model = timm.create_model(model_name=args.model, pretrained=False).to(device)
 
     _, val_loader = create_train_val_dataloader(args)
 
     state_dict = model.state_dict()
-    tree, node_dict = build_tree(args, val_loader.dataset.class_to_idx, state_dict[''])
+    tree, node_dict, label_to_wnid, label_to_id, labels = build_tree(args, val_loader.dataset.class_to_idx, state_dict['head.weight'])
 
     client = openai.OpenAI()
-    gpt = FakeGPT(client, model=args.backend, temperature=args.temperature)
+    gpt = FakeGPT(client, model=args.backend)
 
     sim_func = getattr(metrics, args.sim)
     plan_func = getattr(metrics, args.plan)
@@ -57,7 +53,7 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    solve(model, val_loader, tree, node_dict, gpt, tot)
+    solve(model, val_loader, node_dict, label_to_wnid, label_to_id, labels, device, gpt, tot)
 
 
 if __name__ == "__main__":
@@ -67,8 +63,7 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=72, help='random seed')
     parser.add_argument('--model', type=str, default='vit_base_patch16_224.orig_in21k_ft_in1k', help='model name')
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
-    parser.add_argument('--ckpt', type=str, default='./weights/jx_vit_base_p16_224-80ecf9dd.pth', help='path of model checkpoint')
-    parser.add_argument('--root', type=str, default='/root/autodl-tmp/data', help='dataset path')
+    parser.add_argument('--root', type=str, default='/root/autodl-tmp/data/test', help='dataset path')
     parser.add_argument('--data', type=str, default='imagenet', help='dataset name')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')

@@ -4,14 +4,16 @@ from torchmetrics.clustering import DunnIndex, DaviesBouldinScore, CalinskiHarab
 from pytorch_adapt.layers import SilhouetteScore
 
 
-def clusters_to_xy(cluster):
+def clusters_to_xy(clusters):
     x, y = [], []
     i = 0
-    for _, weights in cluster.items():
+    for _, weights in clusters.items():
         for w in weights:
             x.append(w)
             y.append(i)
         i += 1
+    x = torch.stack(x)
+    y = torch.LongTensor(y).to(x.device)
     return x, y
 
 
@@ -21,7 +23,7 @@ def kl_divergence(x, cluster, reduction='batchmean'):
         y = torch.stack(weights).mean(dim=0)
         out = F.kl_div(x, y, reduction=reduction)
         kl.append(out)
-    return kl
+    return torch.stack(kl)
 
 
 def cosine_similarity(x, cluster):
@@ -30,19 +32,21 @@ def cosine_similarity(x, cluster):
         y = torch.stack(weights).mean(dim=0)
         out = F.cosine_similarity(x, y)
         cs.append(out)
-    return cs
+    return torch.stack(cs)
 
 
-def dunn_index(cluster, p=2):
-    x, y = clusters_to_xy(cluster)
+def dunn_index(clusters, p=2):
+    x, y = clusters_to_xy(clusters)
     di = DunnIndex(p=p)
     out = di(x, y)
     # 越大越好
     return out
 
 
-def silhouette_score(cluster):
-    x, y = clusters_to_xy(cluster)
+def silhouette_score(clusters):
+    x, y = clusters_to_xy(clusters)
+    if x.shape[0] == 2:
+        return 2
     ss = SilhouetteScore()
     out = ss(x, y)
 
@@ -54,15 +58,15 @@ def silhouette_score(cluster):
         return 1
 
 
-def db_index(cluster):
-    x, y = clusters_to_xy(cluster)
+def db_index(clusters):
+    x, y = clusters_to_xy(clusters)
     dbi = DaviesBouldinScore()
     # 越大越好
     return dbi(x, y)
 
 
-def ch_score(cluster):
-    x, y = clusters_to_xy(cluster)
+def ch_score(clusters):
+    x, y = clusters_to_xy(clusters)
     dbi = CalinskiHarabaszScore()
     # 越大越好
     return dbi(x, y)

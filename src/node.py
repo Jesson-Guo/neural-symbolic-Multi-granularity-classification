@@ -1,5 +1,6 @@
 import xml.etree.cElementTree as ET
 import copy
+from nltk.corpus import wordnet as wn
 
 
 class Node(object):
@@ -94,11 +95,13 @@ def build_tree(args, class_to_idx, weights):
     leaf = None
     for wnid, idx in class_to_idx.items():
         node = dic[wnid]
-        leaf = Node(wnid, node.name, node.gloss)
+        name = wn.synset_from_pos_and_offset(wnid[0], int(wnid[1:])).name()
+        leaf = Node(wnid, name, node.gloss)
         leaf.set_weight(weights[idx])
         node_dict[wnid] = leaf
         while node.parent != None:
             if not node.parent.wnid in node_dict.keys():
+                # name = wn.synset_from_pos_and_offset(node.parent.wnid[0], int(node.parent.wnid[1:])).name()
                 temp = Node(node.parent.wnid, node.parent.name, node.parent.gloss)
                 node_dict[node.parent.wnid] = temp
                 temp.update_child(leaf)
@@ -114,4 +117,18 @@ def build_tree(args, class_to_idx, weights):
     tree = node_dict['fall11']
     init_weight(tree, 0)
 
-    return tree, node_dict
+    label_to_wnid, label_to_id = {}, {}
+    labels = []
+    for k, v in node_dict.items():
+        label_to_wnid[v.name] = k
+
+    for k, v in class_to_idx.items():
+        labels.append(node_dict[k].name)
+        label_to_id[node_dict[k].name] = v
+
+    # for k, v in label_to_wnid.items():
+    #     if k.startswith('carpenter'):
+    #         a = 1
+    #         print()
+
+    return tree, node_dict, label_to_wnid, label_to_id, labels
