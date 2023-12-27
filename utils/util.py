@@ -3,6 +3,17 @@ import torch
 from utils.conf import get_world_size
 
 
+class Result:
+    def __init__(self, name, status, parent=None) -> None:
+        self.name = name
+        self.status = status
+        self.parent = parent
+        self.children = []
+
+    def add(self, r):
+        self.children.append(r)
+
+
 class AverageMeter(object):
     def __init__(self):
         self.reset()
