@@ -118,17 +118,25 @@ def build_tree(args, class_to_idx, weights):
     init_weight(tree, 0)
 
     label_to_wnid, label_to_id = {}, {}
-    labels = []
+    labels = {}
     for k, v in node_dict.items():
         label_to_wnid[v.name] = k
 
+    i = 0
     for k, v in class_to_idx.items():
-        labels.append(node_dict[k].name)
-        label_to_id[node_dict[k].name] = v
+        parent_name = node_dict[k].name
+        if parent_name not in label_to_id:
+            label_to_id[parent_name] = v
+            labels[i] = parent_name
+            i += 1
 
-    # for k, v in label_to_wnid.items():
-    #     if k.startswith('carpenter'):
-    #         a = 1
-    #         print()
+    node_children = {}
+    for wnid, idx in class_to_idx.items():
+        node = node_dict[wnid]
+        while node.parent != None:
+            if node.wnid not in node_children:
+                node_children[node.wnid] = {}
+            node_children[node.wnid][idx] = node_dict[wnid].name
+            node = node.parent
 
-    return tree, node_dict, label_to_wnid, label_to_id, labels
+    return node_dict, label_to_wnid, label_to_id, labels, node_children

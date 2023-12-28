@@ -7,7 +7,7 @@ from utils.conf import is_main_process
 from utils.util import accuracy, reduce_mean
 
 
-def solve(model, dataloader, node_dict, label_to_wnid, label_to_id, labels, device, gpt: GPT, tot: ToT):
+def solve(model, dataloader, node_dict, label_to_wnid, label_to_id, device, tot: ToT):
     acc = 0
     if is_main_process():
         bar = progressbar.ProgressBar(0, len(dataloader))
@@ -20,8 +20,8 @@ def solve(model, dataloader, node_dict, label_to_wnid, label_to_id, labels, devi
 
         pred = torch.zeros(x.shape[0]).to(device)
         for i in range(x.shape[0]):
-            output, _, _ = tot.solve(x, labels, node_dict, label_to_wnid, gpt, method='bfs')
-            pred[i] = label_to_id[output]
+            _, label = tot.solve(x, node_dict, label_to_wnid, method='dfs')
+            pred[i] = label_to_id[label]
 
         acc += pred.eq(targets.data).sum()
 

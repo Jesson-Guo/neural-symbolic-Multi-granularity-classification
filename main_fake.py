@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.utils.data
 import torch.backends.cudnn as cudnn
 
-from src.dataloader import create_train_val_dataloader
+from src.dataloader import create_val_dataloader
 from src.node import build_tree
 from src.gpt import FakeGPT
 from src.tot.infer import solve
@@ -33,10 +33,10 @@ def main(args):
 
     model = timm.create_model(model_name=args.model, pretrained=False).to(device)
 
-    _, val_loader = create_train_val_dataloader(args)
+    val_loader = create_val_dataloader(args)
 
     state_dict = model.state_dict()
-    tree, node_dict, label_to_wnid, label_to_id, labels = build_tree(args, val_loader.dataset.class_to_idx, state_dict['head.weight'])
+    node_dict, label_to_wnid, label_to_id, labels, node_children = build_tree(args, val_loader.dataset.class_to_idx, state_dict['head.weight'])
 
     client = openai.OpenAI()
     gpt = FakeGPT(client, model=args.backend)
@@ -44,6 +44,9 @@ def main(args):
     sim_func = getattr(metrics, args.sim)
     plan_func = getattr(metrics, args.plan)
     tot = ToT(plan_func, sim_func)
+    tot.load("./thought_load.json", labels)
+    # 验证一下gpt分类是否有遗漏
+    tot.build_tot(labels, node_dict, label_to_wnid, node_children, node_dict['fall11'], gpt, "./thought.json", False)
 
     if get_world_size() > 1:
         model = nn.parallel.DistributedDataParallel(
@@ -53,7 +56,7 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    solve(model, val_loader, node_dict, label_to_wnid, label_to_id, labels, device, gpt, tot)
+    solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot)
 
 
 if __name__ == "__main__":
@@ -63,7 +66,7 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=72, help='random seed')
     parser.add_argument('--model', type=str, default='vit_base_patch16_224.orig_in21k_ft_in1k', help='model name')
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
-    parser.add_argument('--root', type=str, default='/root/autodl-tmp/data/test', help='dataset path')
+    parser.add_argument('--root', type=str, default='/root/autodl-tmp/data', help='dataset path')
     parser.add_argument('--data', type=str, default='imagenet', help='dataset name')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')

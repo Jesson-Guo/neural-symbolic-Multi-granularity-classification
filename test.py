@@ -7,23 +7,31 @@ import numpy as np
 from torchmetrics.clustering import DunnIndex
 
 from src.gpt import GPT
+import json
 
 
-prompt = '''
-Giving 2 plans to divide the INPUT into 2 categories with title in one word or one phrase.
-INPUT: 'airplane.n.01', 'bird.n.01', 'cat.n.01', 'dog.n.01'
+prompt = '''Giving 2 plans to classify all values from Input into different sets with the class name and only word id. Each value can only belong to one set. \
+Input: {0: "airplane", 1: "bird", 2: "cat", 3: "dog"} \
+Answer: {"Plan1": {"FlyingObjects": [0, 1], "Pets": [2, 3]}, "Plan2": {"NonHuman": [0, 1, 2], "Pets": [3]}} \
+Input: {970: 'alp', 972: 'cliff', 973: 'coral_reef', 974: 'geyser', 975: 'lakeside', 976: 'promontory', 978: 'seashore', 979: 'valley', 980: 'volcano'}\
 '''
-# client = openai.OpenAI()
-# res = chatgpt(client, 'say hello', model='gpt-3.5-turbo', temperature=0.7, max_tokens=1000, n=1, stop=None)
-# print(res)
-# completion = client.chat.completions.create(
-#     model="gpt-3.5-turbo",
-#     messages=[
-#         {"role": "user", "content": prompt}
-#     ]
-# )
 
-print()
+client = openai.OpenAI()
+messages = [
+    {"role": "system", "content": 'You are a helpful assistant and have knowledge of Python. Your response should be in JSON format.'},
+    {"role": "user", "content": prompt}
+]
+completion = client.chat.completions.create(
+    model="gpt-4",
+    messages=messages,
+    temperature=0.7,
+    response_format={"type": "json_object"}
+)
+
+contents = []
+contents.extend([choice.message.content for choice in completion.choices])
+
+print(contents)
 
 '''Giving 4 plans to divide the following labels into 2 categories.
 Input: 'motor vehicle', 'craft', 'placental', 'bird'
@@ -65,20 +73,48 @@ Category 1: Animals\n- Bird\n- Cat\n- Dog\n\nCategory 2: Modes of Transportation
 # c = (a + b) / 2
 # d = torch.stack([a, b]).mean(dim=0)
 
-plans = []
-contents = ["Plan 1:\nCategory 1: Animals\n- Bird.n.01\n- Cat's_kit.n.01\n- Dog.n.01\n\nCategory 2: Transportation\n- Airplane.n.01\n\nPlan 2:\nCategory 1: Animals\n- Bird.n.01\n- Cat's_kit.n.01\n- Dog.n.01\n\nCategory 2: Flying Objects\n- Airplane.n.01"]
-for content in contents:
-    content = content.replace('\n', ' ').strip()
-    content = content.split('Plan')[1:]
-    for s in content:
-        categories = s.split('Category')[1:]
-        c = {}
-        for item in categories:
-            item = item.split(' - ')
-            name = item[0].split(':')[-1].strip()
-            c[name] = []
-            for l in item[1:]:
-                l = l.strip()
-                c[name].append(l)
-        plans.append(c)
-print(plans)
+# contents = ["Plan 1:\nSet 1(set name):1,2\nSet 2(set name):0,3\n\nPlan 2:\nSet 1(set name):0,1,2\nSet 2(set name):3\n\n"]
+# plans = []
+# for content in contents:
+#     content = content.split('\n\n')[: -2]
+#     for s in content:
+#         categories = s.split('\n')[1:]
+#         c = {}
+#         for item in categories:
+#             item = item.split('=')
+#             name = item[0].split('(')[-1][:-2].strip()
+#             c[name] = list(item[-1])
+#             for l in item[1:]:
+#                 l = l.strip()
+#                 c[name].append(l)
+#         plans.append(c)
+# print(plans)
+
+a = contents[0]
+a = a.replace('\n', '')
+a = json.loads(a)
+print(a)
+'''
+{
+    "plan1": {
+        "set1": {
+            "class": "animals",
+            "words": ["2", "3"]
+        },
+        "set2": {
+            "class": "vehicles",
+            "words": ["0", "1"]
+        }
+    },
+    "plan2": {
+        "set1": {
+            "class": "flying",
+            "words": ["0", "1"]
+        },
+        "set2": {
+            "class": "four-legged",
+            "words": ["2", "3"]
+        }
+    }
+}
+'''
