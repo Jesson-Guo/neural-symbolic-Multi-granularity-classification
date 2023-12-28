@@ -38,6 +38,12 @@ def main(args):
     state_dict = model.state_dict()
     node_dict, label_to_wnid, label_to_id, labels, node_children = build_tree(args, val_loader.dataset.class_to_idx, state_dict['head.weight'])
 
+    temp = [151, 152, 153, 154, 155, 157, 158, 159, 161, 162, 163, 164, 165, 166, 167, 168, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 215, 216, 217, 218, 219, 220, 221, 252, 253, 254, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268]
+    temp_dict = {}
+    for i in temp:
+        temp_dict[i] = labels[i]
+    print(temp_dict)
+
     client = openai.OpenAI()
     gpt = FakeGPT(client, model=args.backend)
 

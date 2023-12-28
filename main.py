@@ -48,6 +48,7 @@ def main(args):
     sim_func = getattr(metrics, args.sim)
     plan_func = getattr(metrics, args.plan)
     tot = ToT(plan_func, sim_func)
+    tot.load("./thought_load.json", labels)
     tot.build_tot(labels, node_dict, label_to_wnid, node_children, node_dict['fall11'], gpt, args.save)
 
     if get_world_size() > 1:

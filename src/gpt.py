@@ -8,9 +8,10 @@ class GPT(object):
     prompt_tokens = 0
     prompt_sample = '''Input: {0: "airplane", 1: "bird", 2: "cat", 3: "dog"}
     Answer: {"Plan1": {"FlyingObjects": [0, 1], "Pets": [2, 3]}, "Plan2": {"NonHuman": [0, 1, 2], "Pets": [3]}}'''
-    prompt_template = '''Giving {num_plans} plans to classify all values from Input into different sets with the class name and only word id. Each value can only belong to one set.
-    {sample}
-    Input: {input}'''
+    prompt_template = '''Giving {num_plans} plans to classify all values from Input into different sets with the class name and only word id. Each value can only belong to one set.\
+    {sample} \
+    Input: {input}\
+    '''
 
     def __init__(
         self,

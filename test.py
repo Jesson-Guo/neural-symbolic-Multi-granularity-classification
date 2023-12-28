@@ -10,10 +10,10 @@ from src.gpt import GPT
 import json
 
 
-prompt = '''Giving 2 plans to classify all values from Input into different sets with the class name and only word id. Each value can only belong to one set. \
+prompt = '''Giving 2 plans to classify all values from Input into different sets with the class name and only word id, according to the values' definition in Wordnet. Each value can only belong to one set.\
 Input: {0: "airplane", 1: "bird", 2: "cat", 3: "dog"} \
 Answer: {"Plan1": {"FlyingObjects": [0, 1], "Pets": [2, 3]}, "Plan2": {"NonHuman": [0, 1, 2], "Pets": [3]}} \
-Input: {970: 'alp', 972: 'cliff', 973: 'coral_reef', 974: 'geyser', 975: 'lakeside', 976: 'promontory', 978: 'seashore', 979: 'valley', 980: 'volcano'}\
+Input: {151: 'chihuahua.n.03', 152: 'japanese_spaniel.n.01', 153: 'maltese_dog.n.01', 154: 'pekinese.n.01', 155: 'shih-tzu.n.01', 157: 'papillon.n.01', 158: 'toy_terrier.n.01', 159: 'rhodesian_ridgeback.n.01', 161: 'basset.n.01', 162: 'beagle.n.01', 163: 'bloodhound.n.01', 164: 'bluetick.n.01', 165: 'black-and-tan_coonhound.n.01', 166: 'walker_hound.n.01', 167: 'english_foxhound.n.01', 168: 'redbone.n.01', 179: 'staffordshire_bullterrier.n.01', 180: 'american_staffordshire_terrier.n.01', 181: 'bedlington_terrier.n.01', 182: 'border_terrier.n.01', 183: 'kerry_blue_terrier.n.01', 184: 'irish_terrier.n.01', 185: 'norfolk_terrier.n.01', 186: 'norwich_terrier.n.01', 187: 'yorkshire_terrier.n.01', 188: 'wire-haired_fox_terrier.n.01', 189: 'lakeland_terrier.n.01', 190: 'sealyham_terrier.n.01', 191: 'airedale.n.01', 192: 'cairn.n.02', 193: 'australian_terrier.n.01', 194: 'dandie_dinmont.n.01', 195: 'boston_bull.n.01', 196: 'miniature_schnauzer.n.01', 197: 'giant_schnauzer.n.01', 198: 'standard_schnauzer.n.01', 199: 'scotch_terrier.n.01', 200: 'tibetan_terrier.n.01', 201: 'silky_terrier.n.01', 202: 'soft-coated_wheaten_terrier.n.01', 203: 'west_highland_white_terrier.n.01', 204: 'lhasa.n.02', 215: 'brittany_spaniel.n.01', 216: 'clumber.n.01', 217: 'english_springer.n.01', 218: 'welsh_springer_spaniel.n.01', 219: 'cocker_spaniel.n.01', 220: 'sussex_spaniel.n.01', 221: 'irish_water_spaniel.n.01', 252: 'affenpinscher.n.01', 253: 'basenji.n.01', 254: 'pug.n.01', 259: 'pomeranian.n.01', 260: 'chow.n.03', 261: 'keeshond.n.01', 262: 'brabancon_griffon.n.01', 263: 'pembroke.n.01', 264: 'cardigan.n.02', 265: 'toy_poodle.n.01', 266: 'miniature_poodle.n.01', 267: 'standard_poodle.n.01', 268: 'mexican_hairless.n.01'}\
 '''
 
 client = openai.OpenAI()
@@ -22,9 +22,9 @@ messages = [
     {"role": "user", "content": prompt}
 ]
 completion = client.chat.completions.create(
-    model="gpt-4",
+    model="gpt-4-1106-preview",
     messages=messages,
-    temperature=0.7,
+    temperature=0.8,
     response_format={"type": "json_object"}
 )
 

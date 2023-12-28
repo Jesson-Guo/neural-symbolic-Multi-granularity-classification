@@ -26,7 +26,7 @@ class Thought:
     def stop(self):
         return len(self.labels) == 1
 
-    def add_plan(self, num, t):
+    def add_child(self, num, t):
         if num not in self.plans:
             self.plans[num] = []
         self.plans[num].append(t)
@@ -146,9 +146,31 @@ class ToT:
                 name_t = copy.deepcopy(t.name)
                 name_t.append(node_child.name)
                 t_child = Thought(node_children[node_child.wnid], 2, t, name_t)
-                t.add_plan(0, t_child)
+                t.add_child(0, t_child)
                 thoughts.insert(0, (t_child, node_child))
         return root
+
+    def check_thought(self, thought: Thought):
+        label_set = []
+        for ts in thought.plans:
+            s = set()
+            for t in ts:
+                for l in t.labels.keys():
+                    s.add(l)
+            label_set.append(s)
+
+        remain = []
+        for s in label_set:
+            r = []
+            for i in thought.labels.keys():
+                if not i in s:
+                    r.append(i)
+            remain.append(r)
+
+        for r in remain:
+            if len(r):
+                return 0
+        return 1
 
     def build_tot(self, labels, node_dict, label_to_wnid, node_children, tree, gpt: GPT, save_path, is_load=True):
         # try:
@@ -157,7 +179,9 @@ class ToT:
 
             thoughts = []
             if not is_load:
-                self.root = self.build_on_tree(labels, tree, node_children)
+                root = self.build_on_tree(labels, tree, node_children)
+                # 合并
+                self.root.plans[1] = root
             else:
                 for item in self.root.plans[0]:
                     thoughts.insert(0, item)
@@ -171,7 +195,7 @@ class ToT:
                         name_t = copy.deepcopy(t.name)
                         name_t.append(name)
                         thought = Thought({l: labels[l]}, 2, t, name_t)
-                        t.add_plan(0, thought)
+                        t.add_child(0, thought)
                         thoughts.insert(0, thought)
                     continue
                 if len(t.plans) > 0 and len(t.name) > 1:
@@ -207,7 +231,7 @@ class ToT:
                             for l in ls:
                                 l_dict[l] = labels[l]
                             thought = Thought(l_dict, estimate[i], t, name_t)
-                            t.add_plan(i, thought)
+                            t.add_child(i, thought)
                             thoughts.insert(0, thought)
                     plan_dict[label_str] = t.plans
                 else:
@@ -247,7 +271,7 @@ class ToT:
                 for t_child in ts:
                     child = load_child(t_child)
                     child.parent = t
-                    t.add_plan(int(i), child)
+                    t.add_child(int(i), child)
             return t
 
         f = open(load_path, 'r')
