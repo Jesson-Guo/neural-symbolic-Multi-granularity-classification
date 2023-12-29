@@ -3,6 +3,7 @@ import copy
 from src.gpt import GPT
 from utils.util import Result
 import random
+import traceback
 
 
 STATUS = {
@@ -150,39 +151,49 @@ class ToT:
                 thoughts.insert(0, (t_child, node_child))
         return root
 
-    def check_thought(self, thought: Thought):
+    def check_thought_labels(self, thought: Thought):
         label_set = []
-        for ts in thought.plans:
+        for ts in thought.plans.values():
             s = set()
             for t in ts:
                 for l in t.labels.keys():
                     s.add(l)
             label_set.append(s)
 
-        remain = []
+        left_labels = []
         for s in label_set:
             r = []
             for i in thought.labels.keys():
                 if not i in s:
                     r.append(i)
-            remain.append(r)
+            left_labels.append(r)
 
-        for r in remain:
+        for r in left_labels:
             if len(r):
-                return 0
-        return 1
+                return False, left_labels
+        return True, left_labels
+
+    def check(self):
+        thoughts = [self.root]
+        while len(thoughts):
+            thought = thoughts.pop()
+            ok, left = self.check_thought_labels(thought)
+            assert ok, "labels dismatch between parent thought and children, please checkout the thought json file."
+            for ts in thought.plans.values():
+                for t in ts:
+                    thoughts.append(t)
 
     def build_tot(self, labels, node_dict, label_to_wnid, node_children, tree, gpt: GPT, save_path, is_load=True):
-        # try:
+        try:
             cnt = 0
             plan_dict = {}
-
             thoughts = []
             if not is_load:
                 root = self.build_on_tree(labels, tree, node_children)
                 # 合并
                 self.root.plans[1] = root
             else:
+                self.check()
                 for item in self.root.plans[0]:
                     thoughts.insert(0, item)
 
@@ -193,18 +204,24 @@ class ToT:
                 if len(t.labels) == 2:
                     for l in t.labels:
                         name_t = copy.deepcopy(t.name)
-                        name_t.append(name)
+                        name_t.append(labels[l])
                         thought = Thought({l: labels[l]}, 2, t, name_t)
                         t.add_child(0, thought)
                         thoughts.insert(0, thought)
                     continue
                 if len(t.plans) > 0 and len(t.name) > 1:
+                    label_list = list(t.labels.keys())
+                    label_list.sort()
+                    plan_dict[str(label_list)[1:-1]] = t.plans
+
                     plans_w = []
                     for content in t.plans.values():
                         plan_w = {}
                         for items in content:
                             plan_w[items.name[-1]] = []
                             for label_id in list(items.labels):
+                                if label_id not in labels:
+                                    continue
                                 plan_w[items.name[-1]].append(node_dict[label_to_wnid[labels[label_id]]].weight)
                         plans_w.append(plan_w)
 
@@ -212,6 +229,8 @@ class ToT:
                     for i in range(len(estimate)):
                         for child in t.plans[i]:
                             child.feedback = estimate[i]
+                            thoughts.insert(0, child)
+                    continue
 
                 label_list = list(t.labels.keys())
                 label_list.sort()
@@ -222,23 +241,47 @@ class ToT:
                     estimate = self.estimate_plans(plans_w, self.plan_func)
                     cnt += 1
 
-                    for i in range(len(estimate)):
-                        for name, ls in plans[i].items():
+                    if sum(estimate) == 0:
+                        for k, v in t.labels.items():
                             name_t = copy.deepcopy(t.name)
-                            name_t.append(name)
+                            name_t.append(v)
+                            t.add_child(0, Thought({k: v}, 2, t, name_t))
+                    else:
+                        for i in range(len(estimate)):
+                            for name, ls in plans[i].items():
+                                name_t = copy.deepcopy(t.name)
+                                name_t.append(name)
 
-                            l_dict = {}
-                            for l in ls:
-                                l_dict[l] = labels[l]
-                            thought = Thought(l_dict, estimate[i], t, name_t)
-                            t.add_child(i, thought)
-                            thoughts.insert(0, thought)
+                                l_dict = {}
+                                for l in ls:
+                                    l_dict[l] = labels[l]
+                                thought = Thought(l_dict, estimate[i], t, name_t)
+                                t.add_child(i, thought)
+                                thoughts.insert(0, thought)
+
                     plan_dict[label_str] = t.plans
+                    ok, left = self.check_thought_labels(t)
+                    if not ok:
+                        for i in range(len(left)):
+                            if len(left[i]):
+                                l_dict = {}
+                                for l in left[i]:
+                                    l_dict[l] = labels[l]
+                                name_t = copy.deepcopy(t.name)
+                                name_t.append("Other")
+                                other = Thought(l_dict, 1, t, name_t)
+                                t.add_child(i, other)
+                                thoughts.insert(0, other)
                 else:
                     t.plans = plan_dict[label_str]
+                if cnt % 10 == 0:
+                    self.save(save_path)
             self.save(save_path)
-        # except:
-        #     self.save(save_path)
+        except Exception as e:
+            self.save(save_path)
+            print(e)
+            print(traceback.format_exc())
+            a = 0
 
     def save(self, save_path):
         def save_child(t):
@@ -260,6 +303,7 @@ class ToT:
 
     def load(self, load_path, labels):
         def load_child(t_dict):
+            assert t_dict["labels"].startswith('[') or t_dict["labels"].endswith(']'), "please check your json file."
             label_list = t_dict["labels"][1:-1].split(',')
             label_dict = {}
             for l in label_list:

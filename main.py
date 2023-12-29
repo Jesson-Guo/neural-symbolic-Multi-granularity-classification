@@ -48,7 +48,7 @@ def main(args):
     sim_func = getattr(metrics, args.sim)
     plan_func = getattr(metrics, args.plan)
     tot = ToT(plan_func, sim_func)
-    tot.load("./thought_load.json", labels)
+    tot.load("./imagenet.json", labels)
     tot.build_tot(labels, node_dict, label_to_wnid, node_children, node_dict['fall11'], gpt, args.save)
 
     if get_world_size() > 1:
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     parser.add_argument('--data', type=str, default='imagenet', help='dataset name')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
-    parser.add_argument('--backend', type=str, default='gpt-3.5-turbo-1106', help='gpt model')
+    parser.add_argument('--backend', type=str, default='gpt-4-1106-preview', help='gpt model')
     parser.add_argument('--temperature', type=float, default=0.7, help='gpt model temperature')
     parser.add_argument('--sim', type=str, default='kl_divergence', help='similarity metrics')
     parser.add_argument('--plan', type=str, default='silhouette_score', help='cluster metrics')

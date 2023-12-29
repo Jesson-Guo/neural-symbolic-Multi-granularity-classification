@@ -63,6 +63,7 @@ class GPT(object):
         contents = contents[0]
         contents = contents.replace('\n', '')
         contents = json.loads(contents)
+        print(contents)
 
         plans, plans_w = [], []
         for content in contents.values():
@@ -71,6 +72,8 @@ class GPT(object):
             for name, label_ids in content.items():
                 plan_w[name] = []
                 for label_id in label_ids:
+                    if label_id not in labels:
+                        continue
                     plan_w[name].append(node_dict[label_to_wnid[labels[label_id]]].weight)
             plans_w.append(plan_w)
 

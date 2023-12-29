@@ -45,6 +45,13 @@ def dunn_index(clusters, p=2):
 
 def silhouette_score(clusters):
     x, y = clusters_to_xy(clusters)
+    unique_labels = torch.unique(y)
+    num_samples = len(x)
+    if 1 == len(unique_labels):
+        return 0
+    if len(unique_labels) == num_samples:
+        return 2
+
     if x.shape[0] == 2:
         return 2
     ss = SilhouetteScore()
