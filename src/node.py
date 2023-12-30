@@ -90,6 +90,16 @@ def init_weight(node: Node, layer):
 
 
 def build_tree(args, class_to_idx, weights):
+    class_to_idx_t = {}
+    if args.data == 'cifar10' or args.data == 'cifar100':
+        f = open(args.words, 'r')
+        for line in f.readlines():
+            line = line.split('\n')[0]
+            line = line.split('\t')
+            class_to_idx_t[line[0]] = class_to_idx[line[1]]
+    class_to_idx = class_to_idx_t
+    del class_to_idx_t
+
     _, dic = get_full_hierarchy(args.hier)
     node_dict = {}
     leaf = None

@@ -20,7 +20,7 @@ def solve(model, dataloader, node_dict, label_to_wnid, label_to_id, device, tot:
 
         pred = torch.zeros(x.shape[0]).to(device)
         for i in range(x.shape[0]):
-            _, label = tot.solve(x, node_dict, label_to_wnid, method='dfs')
+            _, label = tot.solve(x.data, node_dict, label_to_wnid, method='dfs')
             pred[i] = label_to_id[label]
 
         acc += pred.eq(targets.data).sum()

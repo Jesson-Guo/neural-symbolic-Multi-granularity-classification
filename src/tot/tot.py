@@ -1,10 +1,14 @@
 import json
 import copy
-from src.gpt import GPT
-from utils.util import Result
 import random
 import traceback
+import sys
 
+from src.gpt import GPT
+from utils.util import Result
+
+
+sys.setrecursionlimit(10000)
 
 STATUS = {
     2: "sure",
@@ -37,7 +41,7 @@ class Thought:
 
     def to_dict(self):
         label_list = [k for k in self.labels.keys()]
-        return {"feedback": self.feedback, "labels": str(label_list), "name": self.name, "plans": {}}
+        return {"feedback": self.feedback, "labels": str(label_list), "name": self.name}
 
 
 class ToT:
@@ -65,27 +69,23 @@ class ToT:
             if idx == 0:
                 break
             idx -= 1
-        name_t = copy.deepcopy(self.name)
+        name_t = copy.deepcopy(t.name)
         name_t.append(name)
         return name_t, t
 
     def choose_plan(self, thought: Thought, node_dict, label_to_wnid):
-        candidate = []
-        for ts in thought.plans.values():
-            # 启发式的选取，likely即可，随机选取TODO
-            if ts[0].is_valid():
-                candidate.append(ts)
-        ts = random.choice(candidate)
-
         plans = []
-        plan, plan_w = {}, {}
-        for t in plans:
-            plan[t.name] = []
-            plan_w[t.name] = []
-            for item in t.labels.values():
-                plan[t.name].append(item)
-                plan_w[t.name].append(node_dict[label_to_wnid[item]].weight)
-        plans.append((plan, plan_w, ts))
+        for ts in thought.plans.values():
+            # 启发式的选取，likely即可
+            if ts[0].is_valid():
+                plan, plan_w = {}, {}
+                for t in ts:
+                    plan[t.name[-1]] = []
+                    plan_w[t.name[-1]] = []
+                    for item in t.labels.values():
+                        plan[t.name[-1]].append(item)
+                        plan_w[t.name[-1]].append(node_dict[label_to_wnid[item]].weight)
+                plans.append((plan, plan_w, ts))
         random.shuffle(plans)
         return plans
 
@@ -99,9 +99,9 @@ class ToT:
             if not thought.is_valid():
                 return False, None
             if thought.stop():
-                r = Result(thought.labels[0], STATUS[thought.feedback], parent=result)
+                r = Result(thought.name[-1], STATUS[thought.feedback], parent=result)
                 res.add(r)
-                return True, thought.labels[0]
+                return True, list(thought.labels.values())[0]
 
             plans = self.choose_plan(thought, node_dict, label_to_wnid)
             for plan, plan_w, ts in plans:
@@ -112,8 +112,8 @@ class ToT:
                     break
             return ok, label
 
-        result = Result(thought.name, STATUS[thought.feedback])
-        _, label = helper(thought, result)
+        result = Result(thought.name[-1], STATUS[thought.feedback])
+        _, label = helper(thought, result, False)
         return result, label
 
     def bfs(self, v, node_dict, label_to_wnid, thought: Thought):
@@ -174,6 +174,8 @@ class ToT:
         return True, left_labels
 
     def check(self):
+        if self.root == None:
+            return 0
         thoughts = [self.root]
         while len(thoughts):
             thought = thoughts.pop()
@@ -188,14 +190,16 @@ class ToT:
             cnt = 0
             plan_dict = {}
             thoughts = []
-            if not is_load:
-                root = self.build_on_tree(labels, tree, node_children)
-                # 合并
-                self.root.plans[1] = root
-            else:
-                self.check()
-                for item in self.root.plans[0]:
-                    thoughts.insert(0, item)
+            # if not is_load:
+            #     root = self.build_on_tree(labels, tree, node_children)
+            #     # 合并
+            #     self.root.plans[1] = root
+            # else:
+            #     self.check()
+            #     for item in self.root.plans[0]:
+            #         thoughts.insert(0, item)
+            self.root = Thought(labels, 2, name=['Thing'])
+            thoughts.append(self.root)
 
             while len(thoughts):
                 t = thoughts.pop()
@@ -289,6 +293,7 @@ class ToT:
                 return t.to_dict()
 
             save_dict = t.to_dict()
+            save_dict["plans"] = {}
             for i, plan in t.plans.items():
                 save_dict["plans"][i] = []
                 for t_child in plan:
@@ -311,6 +316,8 @@ class ToT:
                 label_dict[l] = labels[l]
 
             t = Thought(labels=label_dict, feedback=t_dict["feedback"], parent=None, name=t_dict["name"])
+            if "plans" not in t_dict:
+                t_dict["plans"] = {}
             for i, ts in t_dict["plans"].items():
                 for t_child in ts:
                     child = load_child(t_child)

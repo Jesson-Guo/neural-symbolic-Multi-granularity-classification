@@ -9,7 +9,7 @@ def clusters_to_xy(clusters):
     i = 0
     for _, weights in clusters.items():
         for w in weights:
-            x.append(w)
+            x.append(w.data)
             y.append(i)
         i += 1
     x = torch.stack(x)
