@@ -3,12 +3,13 @@ import copy
 import random
 import traceback
 import sys
+import numpy as np
 
 from src.gpt import GPT
 from utils.util import Result
 
 
-sys.setrecursionlimit(10000)
+sys.setrecursionlimit(100000)
 
 STATUS = {
     2: "sure",
@@ -17,7 +18,7 @@ STATUS = {
 }
 
 
-class Thought:
+class Thought(object):
     def __init__(self, labels, feedback=2, parent=None, name=[]) -> None:
         self.labels = labels
         self.feedback = feedback
@@ -41,7 +42,7 @@ class Thought:
 
     def to_dict(self):
         label_list = [k for k in self.labels.keys()]
-        return {"feedback": self.feedback, "labels": str(label_list), "name": self.name}
+        return {"feedback": self.feedback, "labels": str(label_list), "name": self.name, "plans": {}}
 
 
 class ToT:
@@ -65,13 +66,14 @@ class ToT:
         similarity = func(v, plan_w)
         idx = similarity.argmin().item()
         t = ts[idx]
+        score = similarity[idx].item()
         for name, _ in plan_w.items():
             if idx == 0:
                 break
             idx -= 1
         name_t = copy.deepcopy(t.name)
         name_t.append(name)
-        return name_t, t
+        return name_t, t, score
 
     def choose_plan(self, thought: Thought, node_dict, label_to_wnid):
         plans = []
@@ -84,39 +86,62 @@ class ToT:
                     plan_w[t.name[-1]] = []
                     for item in t.labels.values():
                         plan[t.name[-1]].append(item)
-                        plan_w[t.name[-1]].append(node_dict[label_to_wnid[item]].weight)
+                        plan_w[t.name[-1]].append(node_dict[label_to_wnid[item]].weight.data)
                 plans.append((plan, plan_w, ts))
         random.shuffle(plans)
         return plans
 
     def solve_once(self, v, plan, plan_w, ts):
-        name, t = self.estimate_clusters(v, plan, plan_w, ts, self.sim_func)
-        r = Result(name, STATUS[t.feedback])
+        name, t, score = self.estimate_clusters(v, plan, plan_w, ts, self.sim_func)
+        r = Result(name, STATUS[t.feedback], score)
         return t, r
 
-    def dfs(self, v, node_dict, label_to_wnid, thought: Thought):
+    def dfs(self, v, node_dict, label_to_wnid, alpha, thought: Thought):
         def helper(thought: Thought, res: Result, ok: bool):
             if not thought.is_valid():
-                return False, None
+                return False, None, 1
             if thought.stop():
-                r = Result(thought.name[-1], STATUS[thought.feedback], parent=result)
-                res.add(r)
-                return True, list(thought.labels.values())[0]
+                l = list(thought.labels.values())[0]
+                plan_w = {thought.name[-1]: [node_dict[label_to_wnid[l]].weight.data]}
+                similarity = self.sim_func(v, plan_w)
+                score = similarity.min().item()
+                del similarity
 
+                r = Result(thought.name[-1], STATUS[thought.feedback], score, parent=result)
+                res.add(r)
+                return True, l, score
+
+            score = 1
+            label = None
             plans = self.choose_plan(thought, node_dict, label_to_wnid)
             for plan, plan_w, ts in plans:
                 t, r = self.solve_once(v, plan, plan_w, ts)
                 res.add(r)
-                ok, label = helper(t, r, ok)
-                if ok:
+                if r.score > 0:
+                    r.status = STATUS[0]
+                    continue
+                ok, label, score = helper(t, r, ok)
+                if ok and score < -alpha:
                     break
-            return ok, label
+                ok = False
 
-        result = Result(thought.name[-1], STATUS[thought.feedback])
-        _, label = helper(thought, result, False)
+            if label == None:
+                scores = []
+                for i in range(len(res.children)):
+                    scores.append(res.children[i].score)
+                idx = np.argmax(scores)
+                res.children[idx].status = 1
+
+                plan, plan_w, ts = plans[idx]
+                t, r = self.solve_once(v, plan, plan_w, ts)
+                ok, label, score = helper(t, r, ok)
+            return ok, label, score
+
+        result = Result(thought.name[-1], STATUS[thought.feedback], 0)
+        _, label, _ = helper(thought, result, False)
         return result, label
 
-    def bfs(self, v, node_dict, label_to_wnid, thought: Thought):
+    def bfs(self, v, node_dict, label_to_wnid, alpha, thought: Thought):
         pass
         # result = Result(thought.name, STATUS[thought.feedback])
         # thoughts = [thought]
@@ -133,9 +158,9 @@ class ToT:
         #         thoughts.append(child)
         # return name
 
-    def solve(self, v, node_dict, label_to_wnid, method='dfs'):
+    def solve(self, v, node_dict, label_to_wnid, alpha, method='dfs'):
         method = getattr(self, method)
-        output = method(v, node_dict, label_to_wnid, self.root)
+        output = method(v, node_dict, label_to_wnid, alpha, self.root)
         return output
 
     def build_on_tree(self, labels, tree, node_children):
@@ -183,6 +208,7 @@ class ToT:
             assert ok, "labels dismatch between parent thought and children, please checkout the thought json file."
             for ts in thought.plans.values():
                 for t in ts:
+                    assert len(t.labels) < len(thought.labels), "child thought labels must be smaller than parent."
                     thoughts.append(t)
 
     def build_tot(self, labels, node_dict, label_to_wnid, node_children, tree, gpt: GPT, save_path, is_load=True):
@@ -190,30 +216,29 @@ class ToT:
             cnt = 0
             plan_dict = {}
             thoughts = []
-            # if not is_load:
-            #     root = self.build_on_tree(labels, tree, node_children)
-            #     # 合并
-            #     self.root.plans[1] = root
-            # else:
-            #     self.check()
-            #     for item in self.root.plans[0]:
-            #         thoughts.insert(0, item)
-            self.root = Thought(labels, 2, name=['Thing'])
-            thoughts.append(self.root)
+            if not is_load:
+                self.root = Thought(labels, 2, name=['Thing'])
+                thoughts.append(self.root)
+
+                # root = self.build_on_tree(labels, tree, node_children)
+                # # 合并
+                # self.root.plans[1] = root
+            else:
+                self.check()
+                thoughts.insert(0, self.root)
 
             while len(thoughts):
                 t = thoughts.pop()
                 if (not t.is_valid()) or t.stop():
                     continue
-                if len(t.labels) == 2:
+                if len(t.labels) == 2 and len(t.plans) == 0:
                     for l in t.labels:
                         name_t = copy.deepcopy(t.name)
                         name_t.append(labels[l])
                         thought = Thought({l: labels[l]}, 2, t, name_t)
                         t.add_child(0, thought)
-                        thoughts.insert(0, thought)
                     continue
-                if len(t.plans) > 0 and len(t.name) > 1:
+                if len(t.plans) > 0:
                     label_list = list(t.labels.keys())
                     label_list.sort()
                     plan_dict[str(label_list)[1:-1]] = t.plans
@@ -246,20 +271,18 @@ class ToT:
                     cnt += 1
 
                     if sum(estimate) == 0:
-                        for k, v in t.labels.items():
-                            name_t = copy.deepcopy(t.name)
-                            name_t.append(v)
-                            t.add_child(0, Thought({k: v}, 2, t, name_t))
-                    else:
-                        for i in range(len(estimate)):
-                            for name, ls in plans[i].items():
-                                name_t = copy.deepcopy(t.name)
-                                name_t.append(name)
+                        thoughts.insert(0, t)
+                        continue
 
-                                l_dict = {}
-                                for l in ls:
-                                    l_dict[l] = labels[l]
-                                thought = Thought(l_dict, estimate[i], t, name_t)
+                    for j in range(len(estimate)):
+                        i = len(t.plans)
+                        for name, ls in plans[j].items():
+                            name_t = copy.deepcopy(t.name)
+                            name_t.append(name)
+
+                            if len(ls) < len(t.labels):
+                                l_dict = {l: labels[l] for l in ls}
+                                thought = Thought(l_dict, estimate[j], t, name_t)
                                 t.add_child(i, thought)
                                 thoughts.insert(0, thought)
 
@@ -268,16 +291,15 @@ class ToT:
                     if not ok:
                         for i in range(len(left)):
                             if len(left[i]):
-                                l_dict = {}
-                                for l in left[i]:
-                                    l_dict[l] = labels[l]
+                                l_dict = {l: labels[l] for l in left[i]}
                                 name_t = copy.deepcopy(t.name)
                                 name_t.append("Other")
                                 other = Thought(l_dict, 1, t, name_t)
                                 t.add_child(i, other)
                                 thoughts.insert(0, other)
                 else:
-                    t.plans = plan_dict[label_str]
+                    if t.feedback != 0 and len(t.labels) < len(t.parent.labels):
+                        t.plans = plan_dict[label_str]
                 if cnt % 10 == 0:
                     self.save(save_path)
             self.save(save_path)
@@ -287,20 +309,39 @@ class ToT:
             print(traceback.format_exc())
             a = 0
 
+    # def save(self, save_path):
+    #     def save_child(t):
+    #         if len(t.plans) == 0:
+    #             return t.to_dict()
+
+    #         save_dict = t.to_dict()
+    #         save_dict["plans"] = {}
+    #         for i, plan in t.plans.items():
+    #             save_dict["plans"][i] = []
+    #             for t_child in plan:
+    #                 save_dict["plans"][i].append(save_child(t_child))
+    #         return save_dict
+
+    #     out = save_child(self.root)
+    #     out = json.dumps(out, indent=4, separators=(',', ': '))
+    #     f = open(save_path, 'w')
+    #     f.write(out)
+    #     f.close()
+
     def save(self, save_path):
-        def save_child(t):
+        out = self.root.to_dict()
+        que = [(self.root, out)]
+        while len(que):
+            t, t_dict = que.pop()
             if len(t.plans) == 0:
-                return t.to_dict()
-
-            save_dict = t.to_dict()
-            save_dict["plans"] = {}
+                continue
             for i, plan in t.plans.items():
-                save_dict["plans"][i] = []
-                for t_child in plan:
-                    save_dict["plans"][i].append(save_child(t_child))
-            return save_dict
+                t_dict["plans"][i] = []
+                for t_c in plan:
+                    t_c_dict = t_c.to_dict()
+                    t_dict["plans"][i].append(t_c_dict)
+                    que.insert(0, (t_c, t_c_dict))
 
-        out = save_child(self.root)
         out = json.dumps(out, indent=4, separators=(',', ': '))
         f = open(save_path, 'w')
         f.write(out)

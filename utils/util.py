@@ -4,10 +4,11 @@ from utils.conf import get_world_size
 
 
 class Result:
-    def __init__(self, name, status, parent=None) -> None:
+    def __init__(self, name, status, score, parent=None) -> None:
         self.name = name
         self.status = status
         self.parent = parent
+        self.score = score
         self.children = []
 
     def add(self, r):

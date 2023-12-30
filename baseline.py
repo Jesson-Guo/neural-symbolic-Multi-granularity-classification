@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.utils.data
 import torch.backends.cudnn as cudnn
 
-from src.dataloader import create_train_val_dataloader
+from src.dataloader import create_val_dataloader
 from utils.conf import get_world_size, is_main_process
 from utils.util import accuracy, reduce_mean
 
@@ -27,11 +27,16 @@ def main(args):
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
-    model = timm.create_model(
-        model_name=args.model,
-        pretrained=True,
-        pretrained_cfg_overlay=dict(file=args.ckpt),
-    ).to(device)
+    model = timm.create_model("timm/vit_base_patch16_224.orig_in21k_ft_in1k", pretrained=False)
+    model.head = nn.Linear(model.head.in_features, 100)
+    model.load_state_dict(torch.load("./weights/vit_base_patch16_224_in21k_ft_cifar100.pth", map_location="cpu"))
+    model = model.to(device)
+
+    # model = timm.create_model(
+    #     model_name=args.model,
+    #     pretrained=True,
+    #     pretrained_cfg_overlay=dict(file=args.ckpt),
+    # ).to(device)
 
     if get_world_size() > 1:
         model = nn.parallel.DistributedDataParallel(
@@ -41,7 +46,7 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    _, val_loader = create_train_val_dataloader(args)
+    val_loader = create_val_dataloader(args)
 
     model.eval()
     acc = torch.FloatTensor([0.]).to(device)
@@ -53,6 +58,8 @@ def main(args):
             targets = targets.to(device)
 
             output = model(x)
+            a = output.max()
+            b = output.min()
             output = output.softmax(dim=1)
             # top1, top5 = accuracy(output, targets, topk=(1, 5))
             # acc += top1
@@ -75,11 +82,12 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=50, help='number of epochs to train')
     parser.add_argument('--seed', type=int, default=72, help='random seed')
     parser.add_argument('--model', type=str, default='vit_base_patch16_224.orig_in21k_ft_in1k', help='model name')
-    parser.add_argument('--ckpt', type=str, default='./mycode/weights/jx_vit_base_p16_224-80ecf9dd.pth', help='path of model checkpoint')
+    parser.add_argument('--ckpt', type=str, default='./weights/jx_vit_base_p16_224-80ecf9dd.pth', help='path of model checkpoint')
     parser.add_argument('--root', type=str, default='/root/autodl-tmp/data', help='dataset path')
-    parser.add_argument('--data', type=str, default='imagenet', help='dataset name')
+    parser.add_argument('--data', type=str, default='cifar100', help='dataset name')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
+    parser.add_argument('--classes', type=int, default=100, help='number of classes')
 
     args = parser.parse_args()
     main(args)

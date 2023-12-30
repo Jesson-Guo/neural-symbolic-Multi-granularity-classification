@@ -17,6 +17,16 @@ def clusters_to_xy(clusters):
     return x, y
 
 
+def naive_score(x, cluster):
+    ns = []
+    for _, weights in cluster.items():
+        y = torch.stack(weights).mean(dim=0)
+        out = torch.dot(x, y.T)
+        ns.append(-out)
+        del y
+    return torch.stack(ns)
+
+
 def kl_divergence(x, cluster, reduction='batchmean'):
     kl = []
     for _, weights in cluster.items():
@@ -56,6 +66,7 @@ def silhouette_score(clusters):
         return 2
     ss = SilhouetteScore()
     out = ss(x, y)
+    del x, y
 
     if out < -0.5:
         return 0

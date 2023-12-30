@@ -6,9 +6,9 @@ from openai import OpenAI
 class GPT(object):
     completion_tokens = 0
     prompt_tokens = 0
-    prompt_sample = '''Input: {0: "airplane", 1: "bird", 2: "cat", 3: "dog"}
-    Answer: {"Plan1": {"FlyingObjects": [0, 1], "Pets": [2, 3]}, "Plan2": {"NonHuman": [0, 1, 2], "Pets": [3]}}'''
-    prompt_template = '''Giving {num_plans} plans to classify all values from Input into different sets with the class name and only word id. Each value can only belong to one set.\
+    prompt_sample = '''Input: {0: "airplane", 1: "bird", 2: "dog"} Answer: {"Plan1": {"FlyingObjects": [0, 1], "Pets": [2]}, "Plan2": {"NonHuman": [0, 1], "Pets": [2]}}'''
+    prompt_template = '''Giving {num_plans} plans to classify all values from Input into different sets(at least two sets) with the class name and only word id. \
+    Each value can only belong to one set. Empty set is not allowed. \
     {sample} \
     Input: {input}\
     '''
@@ -67,15 +67,23 @@ class GPT(object):
 
         plans, plans_w = [], []
         for content in contents.values():
-            plans.append(content)
+            # plans.append(content)
+            plan = {}
             plan_w = {}
             for name, label_ids in content.items():
+                plan[name] = []
                 plan_w[name] = []
                 for label_id in label_ids:
                     if label_id not in labels:
                         continue
+                    plan[name].append(label_id)
                     plan_w[name].append(node_dict[label_to_wnid[labels[label_id]]].weight)
-            plans_w.append(plan_w)
+                if plan_w[name] == []:
+                    del plan[name]
+                    del plan_w[name]
+            if plan != {}:
+                plans.append(plan)
+                plans_w.append(plan_w)
 
         return plans, plans_w
 

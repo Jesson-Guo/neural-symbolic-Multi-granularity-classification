@@ -19,12 +19,16 @@ from utils.conf import get_world_size
 
 
 def main(args):
-    model = timm.create_model(
-        model_name=args.model,
-        pretrained=args.pretrained,
-        pretrained_cfg_overlay=dict(file=args.ckpt),
-        num_classes=args.classes
-    )
+    model = timm.create_model("timm/vit_base_patch16_224.orig_in21k_ft_in1k", pretrained=False)
+    model.head = nn.Linear(model.head.in_features, 100)
+    model.load_state_dict(torch.load("./weights/vit_base_patch16_224_in21k_ft_cifar100.pth", map_location="cpu"))
+
+    # model = timm.create_model(
+    #     model_name=args.model,
+    #     pretrained=args.pretrained,
+    #     pretrained_cfg_overlay=dict(file=args.ckpt),
+    #     num_classes=args.classes
+    # )
 
     val_loader = create_val_dataloader(args)
 
@@ -39,7 +43,10 @@ def main(args):
     tot = ToT(plan_func, sim_func)
     if args.load:
         tot.load(args.load, labels)
-    tot.build_tot(labels, node_dict, label_to_wnid, node_children, node_dict['fall11'], gpt, args.save)
+    # tot.build_tot(labels, node_dict, label_to_wnid, node_children, node_dict['fall11'], gpt, args.save)
+    root = tot.build_on_tree(labels, node_dict['fall11'], node_children)
+    tot.root = root
+    tot.save('.base_cifar100.json')
 
 
 if __name__ == "__main__":
@@ -50,12 +57,12 @@ if __name__ == "__main__":
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
     parser.add_argument('--ckpt', type=str, default='/path/to/checkpoint', help='path of model checkpoint')
     parser.add_argument('--root', type=str, default='/path/to/dataset', help='dataset path')
-    parser.add_argument('--data', type=str, default='cifar10', help='dataset name')
-    parser.add_argument('--classes', type=int, default=10, help='number of classes')
+    parser.add_argument('--data', type=str, default='imagenet', help='dataset name')
+    parser.add_argument('--classes', type=int, default=1000, help='number of classes')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
     parser.add_argument('--backend', type=str, default='gpt-4-1106-preview', help='gpt model')
-    parser.add_argument('--temperature', type=float, default=0.7, help='gpt model temperature')
+    parser.add_argument('--temperature', type=float, default=0.8, help='gpt model temperature')
     parser.add_argument('--sim', type=str, default='kl_divergence', help='similarity metrics')
     parser.add_argument('--plan', type=str, default='silhouette_score', help='cluster metrics')
     parser.add_argument('--save', type=str, default='/path/to/save', help='thought file path')
