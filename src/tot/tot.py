@@ -282,6 +282,8 @@ class ToT:
 
                             if len(ls) < len(t.labels):
                                 l_dict = {l: labels[l] for l in ls}
+                                if len(ls) == 1:
+                                    name_t[-1] = ls[0]
                                 thought = Thought(l_dict, estimate[j], t, name_t)
                                 t.add_child(i, thought)
                                 thoughts.insert(0, thought)
@@ -294,6 +296,8 @@ class ToT:
                                 l_dict = {l: labels[l] for l in left[i]}
                                 name_t = copy.deepcopy(t.name)
                                 name_t.append("Other")
+                                if len(left[i]) == 1:
+                                    name_t[-1] = left[i][0]
                                 other = Thought(l_dict, 1, t, name_t)
                                 t.add_child(i, other)
                                 thoughts.insert(0, other)
@@ -308,25 +312,6 @@ class ToT:
             print(e)
             print(traceback.format_exc())
             a = 0
-
-    # def save(self, save_path):
-    #     def save_child(t):
-    #         if len(t.plans) == 0:
-    #             return t.to_dict()
-
-    #         save_dict = t.to_dict()
-    #         save_dict["plans"] = {}
-    #         for i, plan in t.plans.items():
-    #             save_dict["plans"][i] = []
-    #             for t_child in plan:
-    #                 save_dict["plans"][i].append(save_child(t_child))
-    #         return save_dict
-
-    #     out = save_child(self.root)
-    #     out = json.dumps(out, indent=4, separators=(',', ': '))
-    #     f = open(save_path, 'w')
-    #     f.write(out)
-    #     f.close()
 
     def save(self, save_path):
         out = self.root.to_dict()

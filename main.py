@@ -9,13 +9,15 @@ import torch.nn as nn
 import torch.utils.data
 import torch.backends.cudnn as cudnn
 
+from utils import metrics
 from src.dataloader import create_val_dataloader
 from src.node import build_tree
-from src.gpt import GPT
 from src.tot.infer import solve
 from src.tot.tot import ToT
-from utils import metrics
+from src.vpt.models.vit_models import ViT
+from src.vpt.configs.config import get_cfg
 from utils.conf import get_world_size
+from utils.util import get_coarse_labels
 
 
 def main(args):
@@ -25,21 +27,16 @@ def main(args):
 
     cudnn.benchmark = True
 
+    cfg = get_cfg()
+    cfg.merge_from_file(args.config_file)
+
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if args.local_rank != -1:
         torch.cuda.set_device(args.local_rank)
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
-    # model = timm.create_model(
-    #     model_name=args.model,
-    #     pretrained=args.pretrained,
-    #     pretrained_cfg_overlay=dict(file=args.ckpt),
-    #     num_classes=args.classes
-    # ).to(device)
-    model = timm.create_model(args.model, pretrained=False)
-    model.head = nn.Linear(model.head.in_features, args.classes)
-    model.load_state_dict(torch.load(args.ckpt, map_location="cpu"))
+    model = ViT(cfg)
     model = model.to(device)
 
     val_loader = create_val_dataloader(args)
@@ -61,6 +58,8 @@ def main(args):
         )
 
     # solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, 10)
+
+    coarse = get_coarse_labels(tot.root)
     for i in range(60, 140):
         solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, i/10)
         print(i/10)
@@ -87,6 +86,7 @@ if __name__ == "__main__":
     parser.add_argument('--save', type=str, default='/path/to/save', help='thought file path')
     parser.add_argument('--load', type=str, default='', help='thought file path')
     parser.add_argument('--words', type=str, default='/path/to/words', help='words file path')
+    parser.add_argument("--config-file", default="", metavar="FILE", help="path to config file")
 
     args = parser.parse_args()
     main(args)

@@ -7,7 +7,7 @@ class GPT(object):
     completion_tokens = 0
     prompt_tokens = 0
     prompt_sample = '''Input: {0: "airplane", 1: "bird", 2: "dog"} Answer: {"Plan1": {"FlyingObjects": [0, 1], "Pets": [2]}, "Plan2": {"NonHuman": [0, 1], "Pets": [2]}}'''
-    prompt_template = '''Giving {num_plans} plans to classify all values from Input into different sets(at least two sets) with the class name and only word id. \
+    prompt_template = '''Giving {num_plans} plans to classify all values about {cat_name} from Input into different sets(at least two sets) with the class name and only word id. \
     Each value can only belong to one set. Empty set is not allowed. \
     {sample} \
     Input: {input}\
@@ -26,11 +26,11 @@ class GPT(object):
         self.max_tokens = max_tokens
         self.encoding = tiktoken.get_encoding("cl100k_base")
 
-    def construct_prompt(self, labels, num_plans=2, num_categories=2):
+    def construct_prompt(self, labels, num_plans=2, cat_name=""):
         labels_copy = {}
         for k, v in labels.items():
             labels_copy[k] = v.split('.')[0]
-        prompt = self.prompt_template.format(num_plans=num_plans, sample=self.prompt_sample, input=str(labels_copy))
+        prompt = self.prompt_template.format(num_plans=num_plans, cat_name=cat_name, sample=self.prompt_sample, input=str(labels_copy))
         return prompt
 
     def generate(self, labels, num_plans=2, num_categories=2, n=1, stop=None):

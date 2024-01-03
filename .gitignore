@@ -165,4 +165,5 @@ cython_debug/
 weights/
 log/
 *.json
-test*
+test1.py
+test11.py

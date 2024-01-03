@@ -57,3 +57,19 @@ def accuracy(output, target, topk=(1, )):
             correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
             res.append(correct_k.item())
         return res
+
+def get_coarse_labels(root):
+    ts = [root]
+    coarse = dict()
+    cnt = 1
+    while len(ts):
+        t = ts.pop()
+        if len(t.labels) != 1:
+            if t.name[-1] not in coarse:
+                coarse[t.name[-1]] = []
+            coarse[t.name[-1]].append(t.labels)
+            for _ in t.plans.values():
+                for child in _:
+                    ts.append(child)
+                    cnt += 1
+    return coarse
