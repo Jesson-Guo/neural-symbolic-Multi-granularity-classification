@@ -350,7 +350,8 @@ class ToT:
         def load_child(t_dict):
             assert t_dict["labels"].startswith('[') or t_dict["labels"].endswith(']'), "please check your json file."
             if t_dict["labels"] == "[]":
-                return Thought(labels={}, feedback=0, parent=None, name=t_dict["name"])
+                return None
+            #     return Thought(labels={}, feedback=0, parent=None, name=t_dict["name"])
             label_list = t_dict["labels"][1:-1].split(',')
             label_dict = {}
             for l in label_list:
@@ -363,6 +364,8 @@ class ToT:
             for i, ts in t_dict["plans"].items():
                 for t_child in ts:
                     child = load_child(t_child)
+                    if child == None:
+                        continue
                     child.parent = t
                     t.add_child(int(i), child)
             return t

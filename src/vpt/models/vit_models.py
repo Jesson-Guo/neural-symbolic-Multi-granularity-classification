@@ -4,11 +4,10 @@ Note: models return logits instead of prob
 """
 import os
 import numpy as np
-import torch
 import torch.nn as nn
 
-from vit_prompt.vit import PromptedVisionTransformer
-from mlp import MLP
+from src.vpt.models.vit_prompt.vit import PromptedVisionTransformer
+from src.vpt.models.mlp import MLP
 
 
 MODEL_ZOO = {

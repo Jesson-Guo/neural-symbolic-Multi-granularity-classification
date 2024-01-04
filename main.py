@@ -29,8 +29,8 @@ def eval(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot):
     solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, 8)
 
 
-def train_one_batch(model, thought, device):
-    outputs = torch.zeros([x.shape[0], model.head.last_dim], dtype=torch.float32).to(device)
+def train_one_batch(x, model, thought, device):
+    outputs = torch.zeros([x.shape[0], model.head.last_layer.out_features], dtype=torch.float32).to(device)
     x, _ = model(x, return_feature=True)
 
     thoughts = [thought]
@@ -46,22 +46,22 @@ def train_one_batch(model, thought, device):
                 plan_w = {}
                 for i in range(len(ts)):
                     plan_w[ts[i].name[-1]] = []
-                    for item in ts[i].labels.values():
-                        weights = model.head
-                        plan_w[ts[i].name[-1]].append(model.head[item])
+                    for item in ts[i].labels.keys():
+                        plan_w[ts[i].name[-1]].append(model.head.last_layer.weight[item])
                 plans.append((plan_w, ts))
 
-        for i in range(len(plans)):
-            plan_w, ts = plans[i]
+        for plan_w, ts in plans:
             # choose a plan and calculate score
+            out = torch.zeros([x.shape[0], len(plan_w)], dtype=torch.float32).to(device)
             j = 0
             for _, weights in plan_w.items():
-                y = torch.stack(weights).mean(dim=0)
-                out = torch.dot(x, y.T)
-                out = out.softmax(dim=1)
-                ts[j].score = out * t.score
-                thoughts.append(ts[j])
+                y = torch.stack(weights).mean(dim=0, keepdim=True)
+                out[:, j] = torch.matmul(x, y.T).squeeze()
                 j += 1
+            out = out.softmax(dim=1)
+            for j in range(len(ts)):
+                ts[j].score = out[:, j] * t.score
+                thoughts.append(ts[j])
     return outputs
 
 
@@ -84,7 +84,7 @@ def train(tot, model, criterion, optimizer, scheduler, train_loader, total_epoch
             targets = targets.to(device)
 
             tot.clean()
-            outputs = train_one_batch(model, tot.root, device)
+            outputs = train_one_batch(x, model, tot.root, device)
             loss = criterion(outputs, targets)
 
             acc1, acc2 = accuracy(outputs, targets, topk=(1, 5))
@@ -99,7 +99,7 @@ def train(tot, model, criterion, optimizer, scheduler, train_loader, total_epoch
             batch_time.update(time.time() - end)
             end = time.time()
 
-            print(f"epoch: [{epoch}/{total_epoch}]\tbatch: [{idx}]\taverage train loss: {losses.avg}")
+            print(f"epoch: [{epoch+1}/{total_epoch}]\tbatch: [{idx}]\taverage train loss: {losses.avg}")
 
         scheduler.step()
 
@@ -132,13 +132,14 @@ def main(args):
     optimizer = make_optimizer([model], cfg.SOLVER)
     scheduler = make_scheduler(optimizer, cfg.SOLVER)
 
-    criterion = PsychoCrossEntropy(args.num_classes)
+    criterion = PsychoCrossEntropy(args.classes)
 
+    # 图片统一 224*224（考虑一下32*32）
     train_loader = create_train_dataloader(args)
     val_loader = create_val_dataloader(args)
 
     a = model.state_dict()
-    node_dict, label_to_wnid, label_to_id, labels, _ = build_tree(args, val_loader.dataset.class_to_idx, model.state_dict()['head.weight'])
+    node_dict, label_to_wnid, label_to_id, labels, _ = build_tree(args, val_loader.dataset.class_to_idx, model.state_dict()['head.last_layer.weight'])
 
     sim_func = getattr(metrics, args.sim)
     plan_func = getattr(metrics, args.plan)
@@ -153,7 +154,7 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    train(tot, model, criterion, optimizer, scheduler, train_loader, args.epochs, device)
+    # train(tot, model, criterion, optimizer, scheduler, train_loader, args.epochs, device)
 
     path_manager = PathManager()
     path_manager.register_handler(HTTPURLHandler())
