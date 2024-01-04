@@ -158,7 +158,7 @@ def main(args):
 
     path_manager = PathManager()
     path_manager.register_handler(HTTPURLHandler())
-    save_file = os.path.join(cfg.OUTPUT_DIR, ".pth")
+    save_file = os.path.join(cfg.OUTPUT_DIR, "cifar10.pth")
     data = {"model": model.state_dict()}
     with path_manager.open(save_file, "wb") as f:
         torch.save(data, cast(IO[bytes], f))
