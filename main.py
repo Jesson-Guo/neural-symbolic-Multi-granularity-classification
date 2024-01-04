@@ -1,23 +1,112 @@
 import argparse
 import os
 import random
-import openai
+import time
+from iopath.common.file_io import HTTPURLHandler, PathManager
+from typing import Any, cast, Dict, IO
 
-import timm
 import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.backends.cudnn as cudnn
 
 from utils import metrics
-from src.dataloader import create_val_dataloader
-from src.node import build_tree
+from src.dataloader import create_val_dataloader, create_train_dataloader
+from src.node import build_tree, init_weight
 from src.tot.infer import solve
 from src.tot.tot import ToT
 from src.vpt.models.vit_models import ViT
 from src.vpt.configs.config import get_cfg
+from src.solver.loss import PsychoCrossEntropy
+from src.solver.lr_scheduler import make_scheduler
+from src.solver.optimizer import make_optimizer
 from utils.conf import get_world_size
-from utils.util import get_coarse_labels
+from utils.util import get_coarse_labels, AverageMeter, accuracy
+
+
+def eval(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot):
+    init_weight(node_dict['fall11'], 0)
+    solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, 8)
+
+
+def train_one_batch(model, thought, device):
+    outputs = torch.zeros([x.shape[0], model.head.last_dim], dtype=torch.float32).to(device)
+    x, _ = model(x, return_feature=True)
+
+    thoughts = [thought]
+    while len(thoughts):
+        t = thoughts.pop()
+        if t.stop():
+            label_id = list(t.labels.keys())[0]
+            outputs[:, label_id] += t.score
+
+        plans = []
+        for ts in t.plans.values():
+            if ts[0].is_valid():
+                plan_w = {}
+                for i in range(len(ts)):
+                    plan_w[ts[i].name[-1]] = []
+                    for item in ts[i].labels.values():
+                        weights = model.head
+                        plan_w[ts[i].name[-1]].append(model.head[item])
+                plans.append((plan_w, ts))
+
+        for i in range(len(plans)):
+            plan_w, ts = plans[i]
+            # choose a plan and calculate score
+            j = 0
+            for _, weights in plan_w.items():
+                y = torch.stack(weights).mean(dim=0)
+                out = torch.dot(x, y.T)
+                out = out.softmax(dim=1)
+                ts[j].score = out * t.score
+                thoughts.append(ts[j])
+                j += 1
+    return outputs
+
+
+def train(tot, model, criterion, optimizer, scheduler, train_loader, total_epoch, device):
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    losses = AverageMeter()
+    batch_time = AverageMeter()
+    acc = torch.zeros(2).to(device)
+
+    for epoch in range(total_epoch):
+        losses.reset()
+        batch_time.reset()
+
+        end = time.time()
+
+        for idx, (x, targets) in enumerate(train_loader):
+            x = x.to(device)
+            targets = targets.to(device)
+
+            tot.clean()
+            outputs = train_one_batch(model, tot.root, device)
+            loss = criterion(outputs, targets)
+
+            acc1, acc2 = accuracy(outputs, targets, topk=(1, 5))
+            acc[0] += acc1
+            acc[1] += acc2
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            losses.update(loss.item(), x.shape[0])
+            batch_time.update(time.time() - end)
+            end = time.time()
+
+            print(f"epoch: [{epoch}/{total_epoch}]\tbatch: [{idx}]\taverage train loss: {losses.avg}")
+
+        scheduler.step()
+
+        acc = acc / len(train_loader.dataset)
+        print(f'\
+            train top1: {acc[0].item()}\t\
+            train top5: {acc[1].item()}')
 
 
 def main(args):
@@ -29,6 +118,7 @@ def main(args):
 
     cfg = get_cfg()
     cfg.merge_from_file(args.config_file)
+    cfg.merge_from_list(args.opts)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if args.local_rank != -1:
@@ -39,10 +129,16 @@ def main(args):
     model = ViT(cfg)
     model = model.to(device)
 
+    optimizer = make_optimizer([model], cfg.SOLVER)
+    scheduler = make_scheduler(optimizer, cfg.SOLVER)
+
+    criterion = PsychoCrossEntropy(args.num_classes)
+
+    train_loader = create_train_dataloader(args)
     val_loader = create_val_dataloader(args)
 
-    state_dict = model.state_dict()
-    node_dict, label_to_wnid, label_to_id, labels, _ = build_tree(args, val_loader.dataset.class_to_idx, state_dict['head.weight'])
+    a = model.state_dict()
+    node_dict, label_to_wnid, label_to_id, labels, _ = build_tree(args, val_loader.dataset.class_to_idx, model.state_dict()['head.weight'])
 
     sim_func = getattr(metrics, args.sim)
     plan_func = getattr(metrics, args.plan)
@@ -57,12 +153,14 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    # solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, 10)
+    train(tot, model, criterion, optimizer, scheduler, train_loader, args.epochs, device)
 
-    coarse = get_coarse_labels(tot.root)
-    for i in range(60, 140):
-        solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, i/10)
-        print(i/10)
+    path_manager = PathManager()
+    path_manager.register_handler(HTTPURLHandler())
+    save_file = os.path.join(cfg.OUTPUT_DIR, ".pth")
+    data = {"model": model.state_dict()}
+    with path_manager.open(save_file, "wb") as f:
+        torch.save(data, cast(IO[bytes], f))
 
 
 if __name__ == "__main__":
@@ -70,6 +168,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--local_rank', default=os.getenv('LOCAL_RANK', -1), type=int)
     parser.add_argument('--seed', type=int, default=72, help='random seed')
+    parser.add_argument('--epochs', type=int, default=20, help='number of epochs')
     parser.add_argument('--model', type=str, default='timm model name', help='model name')
     parser.add_argument('--pretrained', action= "store_true", help = "")
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
@@ -87,6 +186,12 @@ if __name__ == "__main__":
     parser.add_argument('--load', type=str, default='', help='thought file path')
     parser.add_argument('--words', type=str, default='/path/to/words', help='words file path')
     parser.add_argument("--config-file", default="", metavar="FILE", help="path to config file")
+    parser.add_argument(
+        "opts",
+        help="Modify config options using the command-line",
+        default=None,
+        nargs=argparse.REMAINDER,
+    )
 
     args = parser.parse_args()
     main(args)

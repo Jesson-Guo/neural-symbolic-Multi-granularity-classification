@@ -26,6 +26,8 @@ class Thought(object):
         self.plans = {}
         self.name = name
 
+        self.score = None
+
     def is_valid(self):
         return self.feedback > 0
 
@@ -50,6 +52,17 @@ class ToT:
         self.plan_func = plan_func
         self.sim_func = sim_func
         self.root = None
+
+    def clean(self):
+        thoughts = [self.root]
+        while len(thoughts):
+            t = thoughts.pop()
+            t.score = None
+            for ts in t.plans.values():
+                for i in range(len(ts)):
+                    thoughts.append(ts[i])
+
+        self.root.score = 1
 
     def estimate_plans(self, plans_w, func):
         result = []
@@ -212,6 +225,7 @@ class ToT:
                     thoughts.append(t)
 
     def build_tot(self, labels, node_dict, label_to_wnid, node_children, tree, gpt: GPT, save_path, is_load=True):
+        # TODO 改一下，other的含义变了
         try:
             cnt = 0
             plan_dict = {}
@@ -335,6 +349,8 @@ class ToT:
     def load(self, load_path, labels):
         def load_child(t_dict):
             assert t_dict["labels"].startswith('[') or t_dict["labels"].endswith(']'), "please check your json file."
+            if t_dict["labels"] == "[]":
+                return Thought(labels={}, feedback=0, parent=None, name=t_dict["name"])
             label_list = t_dict["labels"][1:-1].split(',')
             label_dict = {}
             for l in label_list:

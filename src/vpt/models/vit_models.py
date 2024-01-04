@@ -79,25 +79,16 @@ class ViT(nn.Module):
         )
 
     def forward(self, x, return_feature=False):
-        if self.side is not None:
-            side_output = self.side(x)
-            side_output = side_output.view(side_output.size(0), -1)
-            side_output = self.side_projection(side_output)
-
         if self.froze_enc and self.enc.training:
             self.enc.eval()
         x = self.enc(x)  # batch_size x self.feat_dim
-
-        if self.side is not None:
-            alpha_squashed = torch.sigmoid(self.side_alpha)
-            x = alpha_squashed * x + (1 - alpha_squashed) * side_output
 
         if return_feature:
             return x, x
         x = self.head(x)
 
         return x
-    
+
     def forward_cls_layerwise(self, x):
         cls_embeds = self.enc.forward_cls_layerwise(x)
         return cls_embeds

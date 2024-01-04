@@ -1,9 +1,9 @@
 _BASE_: "../base-prompt.yaml"
 RUN_N_TIMES: 1
 DATA:
-  NAME: "CIFAR100"
-  DATAPATH: ""  #TODO: need to specify here
-  NUMBER_CLASSES: 100
+  NAME: "CIFAR10"
+  DATAPATH: ""
+  NUMBER_CLASSES: 10
   MULTILABEL: False
 MODEL:
   TYPE: "vit"
