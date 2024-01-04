@@ -167,3 +167,4 @@ log/
 *.json
 test1.py
 test11.py
+output/
