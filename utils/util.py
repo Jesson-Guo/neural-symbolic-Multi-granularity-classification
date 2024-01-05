@@ -75,14 +75,14 @@ def get_coarse_labels(root):
     return coarse
 
 
-def get_coarse_num(root):
-    num_coarse = -1
-    num_fine = 0
+def get_coarse_num(root, num_classes):
+    num_coarse = num_classes-1
 
     ts = [root]
     while len(ts):
         t = ts.pop()
         if t.stop():
+            t.tid = list(t.labels.keys())[0]
             continue
         t.tid = num_coarse
         num_coarse += 1
@@ -90,4 +90,4 @@ def get_coarse_num(root):
             for child in _:
                 ts.insert(0, child)
 
-    return num_coarse
+    return num_coarse-num_classes
