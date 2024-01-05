@@ -1,6 +1,7 @@
 import argparse
 import os
 import random
+import traceback
 import time
 from iopath.common.file_io import HTTPURLHandler, PathManager
 from typing import Any, cast, Dict, IO
@@ -21,7 +22,29 @@ from src.solver.loss import PsychoCrossEntropy
 from src.solver.lr_scheduler import make_scheduler
 from src.solver.optimizer import make_optimizer
 from utils.conf import get_world_size
-from utils.util import get_coarse_num, AverageMeter, accuracy
+from utils.util import AverageMeter, accuracy
+
+
+def get_coarse_num(root, num_classes):
+    num_coarse = num_classes-1
+    leaf_to_coarse = {}
+    for i in range(num_classes):
+        leaf_to_coarse[i] = set()
+
+    ts = [root]
+    while len(ts):
+        t = ts.pop()
+        if t.stop():
+            t.tid = list(t.labels.keys())[0]
+            continue
+
+        t.tid = num_coarse
+        num_coarse += 1
+        for _ in t.plans.values():
+            for child in _:
+                ts.insert(0, child)
+
+    return num_coarse-num_classes, leaf_to_coarse
 
 
 def eval(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot):
@@ -29,9 +52,9 @@ def eval(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot):
     solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, 8)
 
 
-def train_one_batch(x, targets, model, thought, num_classes, device):
+def train_one_batch(x, targets, model, criterion, thought, num_classes, device):
     outputs = torch.zeros([x.shape[0], num_classes], dtype=torch.float32).to(device)
-    penalty = torch.FloatTensor(0)
+    penalty = 0.
 
     x, _ = model(x, return_feature=True)
 
@@ -48,19 +71,34 @@ def train_one_batch(x, targets, model, thought, num_classes, device):
                 plan_w = []
                 for i in range(len(ts)):
                     plan_w.append(model.head.last_layer.weight[ts[i].tid])
-                plans.append((plan_w, ts))
 
-        for plan_w, ts in plans:
+                coarse_targets = torch.ones_like(targets) * (len(ts)-1)
+                for i in range(targets.shape[0]):
+                    for j in range(len(ts)-1):
+                        if len(ts[j].labels) and targets[i].item() in ts[j].labels:
+                            coarse_targets[i] = j
+                            break
+
+                plans.append((plan_w, ts, coarse_targets))
+
+        for plan_w, ts, coarse_targets in plans:
             # choose a plan and calculate score
             out = torch.zeros([x.shape[0], len(plan_w)], dtype=torch.float32).to(device)
             for i in range(len(plan_w)):
                 y = plan_w[i].unsqueeze(0)
                 out[:, i] = torch.matmul(x, y.T).squeeze()
             out = out.softmax(dim=1)
+            try:
+                penalty += criterion(out, coarse_targets, num_classes=len(ts))
+            except Exception as e:
+                print(e)
+                print(traceback.format_exc())
+                print(t.name)
+                exit(0)
             for j in range(len(ts)):
                 ts[j].score = out[:, j] * t.score
                 thoughts.append(ts[j])
-    return outputs
+    return outputs, penalty
 
 
 def train(tot, model, criterion, optimizer, scheduler, train_loader, num_classes, total_epoch, device, mode="tot"):
@@ -86,10 +124,13 @@ def train(tot, model, criterion, optimizer, scheduler, train_loader, num_classes
 
             if mode == "tot":
                 tot.clean()
-                outputs = train_one_batch(x, model, tot.root, num_classes, device)
+                outputs, penalty = train_one_batch(x, targets, model, criterion, tot.root, num_classes, device)
             elif mode == "baseline":
                 outputs = model(x)
-            loss = criterion(outputs, targets)
+                penalty = 0
+
+            loss = criterion(outputs, targets, norm=True)
+            loss += penalty
 
             acc1, acc2 = accuracy(outputs, targets, topk=(1, 5))
             acc[0] += acc1
@@ -127,6 +168,7 @@ def main(args):
 
     print(cfg)
 
+    # device = torch.device("cpu")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if args.local_rank != -1:
         torch.cuda.set_device(args.local_rank)
@@ -146,7 +188,7 @@ def main(args):
 
     # 这里可以考虑一下是否固定叶子的weight，直接用预训练的参数还是重新训练
     # 这是不固定，重新训练
-    num_coarses = get_coarse_num(tot.root, cfg.DATA.NUMBER_CLASSES)
+    num_coarses, leaf_to_coarse = get_coarse_num(tot.root, cfg.DATA.NUMBER_CLASSES)
     cfg.DATA.NUMBER_CLASSES += num_coarses
 
     model = ViT(cfg)

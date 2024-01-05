@@ -1,6 +1,6 @@
 #!/bin/bash
 python main.py \
-        --epochs 50 \
+        --epochs 10 \
         --lr 0.05 \
         --root /root/autodl-tmp/data \
         --load /root/mycode/neural-symbolic-Multi-granularity-classification/cifar10.json \

@@ -33,7 +33,7 @@ class Thought(object):
         return self.feedback > 0
 
     def stop(self):
-        return len(self.labels) <= 1
+        return len(self.labels) == 1
 
     def add_child(self, num, t):
         if num not in self.plans:
@@ -351,8 +351,8 @@ class ToT:
         def load_child(t_dict):
             assert t_dict["labels"].startswith('[') or t_dict["labels"].endswith(']'), "please check your json file."
             if t_dict["labels"] == "[]":
-                return None
-            #     return Thought(labels={}, feedback=0, parent=None, name=t_dict["name"])
+                # return None
+                return Thought(labels={}, feedback=0, parent=None, name=t_dict["name"])
             label_list = t_dict["labels"][1:-1].split(',')
             label_dict = {}
             for l in label_list:
