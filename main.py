@@ -16,7 +16,6 @@ from src.node import build_tree, init_weight
 from src.tot.infer import solve
 from src.tot.tot import ToT
 from src.vpt.models.vit_models import ViT
-from src.vpt.models.mlp import MLP
 from src.vpt.configs.config import get_cfg
 from src.solver.loss import PsychoCrossEntropy
 from src.solver.lr_scheduler import make_scheduler
@@ -30,8 +29,10 @@ def eval(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot):
     solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, 8)
 
 
-def train_one_batch(x, model, thought, num_classes, device):
+def train_one_batch(x, targets, model, thought, num_classes, device):
     outputs = torch.zeros([x.shape[0], num_classes], dtype=torch.float32).to(device)
+    penalty = torch.FloatTensor(0)
+
     x, _ = model(x, return_feature=True)
 
     thoughts = [thought]
@@ -132,34 +133,29 @@ def main(args):
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
-    model = ViT(cfg)
-
-    optimizer = make_optimizer([model], cfg.SOLVER)
-    scheduler = make_scheduler(optimizer, cfg.SOLVER)
-
-    criterion = PsychoCrossEntropy(args.classes)
-
     # 图片统一 224*224（考虑一下32*32）
     train_loader = create_train_dataloader(args)
     val_loader = create_val_dataloader(args)
 
-    a = model.state_dict()
-    node_dict, label_to_wnid, label_to_id, labels, _ = build_tree(args, val_loader.dataset.class_to_idx, model.state_dict()['head.last_layer.weight'])
+    node_dict, label_to_wnid, label_to_id, labels, _ = build_tree(args, val_loader.dataset.class_to_idx)
 
     sim_func = getattr(metrics, args.sim)
     plan_func = getattr(metrics, args.plan)
     tot = ToT(plan_func, sim_func)
     tot.load(args.load, labels)
 
-    num_coarses = get_coarse_num(tot.root, args.classes)
     # 这里可以考虑一下是否固定叶子的weight，直接用预训练的参数还是重新训练
     # 这是不固定，重新训练
-    model.head = MLP(
-        input_dim=model.feat_dim,
-        mlp_dims=[model.feat_dim] * cfg.MODEL.MLP_NUM + [num_coarses+args.classes],
-        special_bias=True
-    )
+    num_coarses = get_coarse_num(tot.root, cfg.DATA.NUMBER_CLASSES)
+    cfg.DATA.NUMBER_CLASSES += num_coarses
+
+    model = ViT(cfg)
     model = model.to(device)
+
+    optimizer = make_optimizer([model], cfg.SOLVER)
+    scheduler = make_scheduler(optimizer, cfg.SOLVER)
+
+    criterion = PsychoCrossEntropy(cfg.DATA.NUMBER_CLASSES)
 
     if get_world_size() > 1:
         model = nn.parallel.DistributedDataParallel(
@@ -169,11 +165,11 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    train(tot, model, criterion, optimizer, scheduler, train_loader, args.classes, args.epochs, device, mode="tot")
+    train(tot, model, criterion, optimizer, scheduler, train_loader, cfg.DATA.NUMBER_CLASSES, args.epochs, device, mode="tot")
 
     path_manager = PathManager()
     path_manager.register_handler(HTTPURLHandler())
-    save_file = os.path.join(cfg.OUTPUT_DIR, "base_cifar10.pth")
+    save_file = os.path.join(cfg.OUTPUT_DIR, "cifar10.pth")
     data = {"model": model.state_dict()}
     with path_manager.open(save_file, "wb") as f:
         torch.save(data, cast(IO[bytes], f))
@@ -186,11 +182,9 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=72, help='random seed')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs')
     parser.add_argument('--lr', type=float, default=1e-4, help='initial learning rate')
-    parser.add_argument('--pretrained', action= "store_true", help = "")
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
     parser.add_argument('--root', type=str, default='/path/to/dataset', help='dataset path')
     parser.add_argument('--data', type=str, default='imagenet', help='dataset name')
-    parser.add_argument('--classes', type=int, default=1000, help='number of classes')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
     parser.add_argument('--backend', type=str, default='gpt-4-1106-preview', help='gpt model')

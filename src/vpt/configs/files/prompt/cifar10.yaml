@@ -8,6 +8,7 @@ DATA:
   BATCH_SIZE: 64
   FEATURE: "sup_vitb16_imagenet21k"
 MODEL:
+  TRANSFER_TYPE: "prompt"
   TYPE: "vit"
   MODEL_ROOT: "./weights"
   PROMPT:
@@ -15,6 +16,6 @@ MODEL:
     DROPOUT: 0.1
     NUM_TOKENS: 10
 SOLVER:
-  BASE_LR: 0.1
+  BASE_LR: 0.05
   WEIGHT_DECAY: 0.01
 OUTPUT_DIR: "./output"

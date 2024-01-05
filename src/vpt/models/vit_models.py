@@ -7,6 +7,7 @@ import numpy as np
 import torch.nn as nn
 
 from src.vpt.models.vit_prompt.vit import PromptedVisionTransformer
+from src.vpt.models.vit_backbone.vit import VisionTransformer
 from src.vpt.models.mlp import MLP
 
 
@@ -58,17 +59,24 @@ class ViT(nn.Module):
 
         self.froze_enc = False
 
-        self.enc = PromptedVisionTransformer(
-            cfg.MODEL.PROMPT, cfg.DATA.FEATURE, cfg.DATA.CROPSIZE, num_classes=-1, vis=vis
-        )
+        transfer_type = cfg.MODEL.TRANSFER_TYPE
+
+        if "prompt" in transfer_type:
+            self.enc = PromptedVisionTransformer(cfg.MODEL.PROMPT, cfg.DATA.FEATURE, cfg.DATA.CROPSIZE, num_classes=-1, vis=vis)
+        else:
+            self.enc = VisionTransformer(cfg.DATA.FEATURE, cfg.DATA.CROPSIZE, num_classes=-1, vis=vis)
 
         if load_pretrain:
             self.enc.load_from(np.load(os.path.join(cfg.MODEL.MODEL_ROOT, MODEL_ZOO[cfg.DATA.FEATURE])))
 
         self.feat_dim = m2featdim[cfg.DATA.FEATURE]
 
-        for k, p in self.enc.named_parameters():
-            if "prompt" not in k:
+        if transfer_type == "prompt":
+            for k, p in self.enc.named_parameters():
+                if "prompt" not in k:
+                    p.requires_grad = False
+        elif transfer_type == "linear":
+            for k, p in self.enc.named_parameters():
                 p.requires_grad = False
 
         self.head = MLP(

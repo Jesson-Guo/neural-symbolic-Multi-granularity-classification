@@ -89,7 +89,7 @@ def init_weight(node: Node, layer):
     return weight
 
 
-def build_tree(args, class_to_idx, weights):
+def build_tree(args, class_to_idx):
     class_to_idx_t = {}
     if args.data == 'cifar10' or args.data == 'cifar100':
         f = open(args.words, 'r')
@@ -107,7 +107,7 @@ def build_tree(args, class_to_idx, weights):
         node = dic[wnid]
         name = wn.synset_from_pos_and_offset(wnid[0], int(wnid[1:])).name()
         leaf = Node(wnid, name, node.gloss)
-        leaf.set_weight(weights[idx])
+        # leaf.set_weight(weights[idx])
         node_dict[wnid] = leaf
         while node.parent != None:
             if not node.parent.wnid in node_dict.keys():
@@ -125,7 +125,7 @@ def build_tree(args, class_to_idx, weights):
                 break
     node_dict = prunning_tree(node_dict)
     tree = node_dict['fall11']
-    init_weight(tree, 0)
+    # init_weight(tree, 0)
 
     label_to_wnid, label_to_id = {}, {}
     labels = {}
