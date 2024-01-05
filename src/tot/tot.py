@@ -2,14 +2,11 @@ import json
 import copy
 import random
 import traceback
-import sys
 import numpy as np
 
 from src.gpt import GPT
 from utils.util import Result
 
-
-sys.setrecursionlimit(100000)
 
 STATUS = {
     2: "sure",
@@ -19,7 +16,7 @@ STATUS = {
 
 
 class Thought(object):
-    def __init__(self, labels, feedback=2, parent=None, name=[]) -> None:
+    def __init__(self, labels, feedback=2, parent=None, name="") -> None:
         self.labels = labels
         self.feedback = feedback
         self.parent = parent
@@ -65,10 +62,10 @@ class ToT:
 
         self.root.score = 1
 
-    def estimate_plans(self, plans_w, func):
+    def estimate_plans(self, plans_w):
         result = []
         for plan_w in plans_w:
-            out = func(plan_w)
+            out = self.plan_func(plan_w)
             # out是2/1/0表示sure/likely/impossible，后续也可以比较启发式和最优的差别
             # 这里也可以考虑将index传给gpt让gpt评价（可尝试）
             result.append(out)
@@ -96,11 +93,11 @@ class ToT:
             if ts[0].is_valid():
                 plan, plan_w = {}, {}
                 for t in ts:
-                    plan[t.name[-1]] = []
-                    plan_w[t.name[-1]] = []
+                    plan[t.name] = []
+                    plan_w[t.name] = []
                     for item in t.labels.values():
-                        plan[t.name[-1]].append(item)
-                        plan_w[t.name[-1]].append(node_dict[label_to_wnid[item]].weight.data)
+                        plan[t.name].append(item)
+                        plan_w[t.name].append(node_dict[label_to_wnid[item]].weight.data)
                 plans.append((plan, plan_w, ts))
         random.shuffle(plans)
         return plans
@@ -116,12 +113,12 @@ class ToT:
                 return False, None, 1
             if thought.stop():
                 l = list(thought.labels.values())[0]
-                plan_w = {thought.name[-1]: [node_dict[label_to_wnid[l]].weight.data]}
+                plan_w = {thought.name: [node_dict[label_to_wnid[l]].weight.data]}
                 similarity = self.sim_func(v, plan_w)
                 score = similarity.min().item()
                 del similarity
 
-                r = Result(thought.name[-1], STATUS[thought.feedback], score, parent=result)
+                r = Result(thought.name, STATUS[thought.feedback], score, parent=result)
                 res.add(r)
                 return True, l, score
 
@@ -151,7 +148,7 @@ class ToT:
                 ok, label, score = helper(t, r, ok)
             return ok, label, score
 
-        result = Result(thought.name[-1], STATUS[thought.feedback], 0)
+        result = Result(thought.name, STATUS[thought.feedback], 0)
         _, label, _ = helper(thought, result, False)
         return result, label
 
@@ -262,14 +259,14 @@ class ToT:
                     for content in t.plans.values():
                         plan_w = {}
                         for items in content:
-                            plan_w[items.name[-1]] = []
+                            plan_w[items.name] = []
                             for label_id in list(items.labels):
                                 if label_id not in labels:
                                     continue
-                                plan_w[items.name[-1]].append(node_dict[label_to_wnid[labels[label_id]]].weight)
+                                plan_w[items.name].append(node_dict[label_to_wnid[labels[label_id]]].weight)
                         plans_w.append(plan_w)
 
-                    estimate = self.estimate_plans(plans_w, self.plan_func)
+                    estimate = self.estimate_plans(plans_w)
                     for i in range(len(estimate)):
                         for child in t.plans[i]:
                             child.feedback = estimate[i]
@@ -282,7 +279,7 @@ class ToT:
                 if label_str not in plan_dict:
                     contents = gpt.generate(t.labels, num_plans=2, num_categories=2, n=1)
                     plans, plans_w = gpt.gen_plans(contents, node_dict, label_to_wnid, t.labels)
-                    estimate = self.estimate_plans(plans_w, self.plan_func)
+                    estimate = self.estimate_plans(plans_w)
                     cnt += 1
 
                     if sum(estimate) == 0:
@@ -351,7 +348,6 @@ class ToT:
         def load_child(t_dict):
             assert t_dict["labels"].startswith('[') or t_dict["labels"].endswith(']'), "please check your json file."
             if t_dict["labels"] == "[]":
-                # return None
                 return Thought(labels={}, feedback=0, parent=None, name=t_dict["name"])
             label_list = t_dict["labels"][1:-1].split(',')
             label_dict = {}
@@ -359,16 +355,32 @@ class ToT:
                 l = int(l.strip())
                 label_dict[l] = labels[l]
 
-            t = Thought(labels=label_dict, feedback=t_dict["feedback"], parent=None, name=t_dict["name"])
+            t = Thought(labels=label_dict, feedback=t_dict["feedback"], parent=None, name=t_dict["name"][-1])
             if "plans" not in t_dict:
                 t_dict["plans"] = {}
             for i, ts in t_dict["plans"].items():
+                miscellaneous = None
+                other = None
                 for t_child in ts:
                     child = load_child(t_child)
                     if child == None:
                         continue
+                    if child.name == "Other":
+                        other = child
+                        continue
+                    if child.name == "Miscellaneous":
+                        miscellaneous = child
                     child.parent = t
                     t.add_child(int(i), child)
+                if other != None:
+                    if miscellaneous == None:
+                        other.name = "Miscellaneous"
+                        other.parent = t
+                        t.add_child(int(i), other)
+                    else:
+                        for k, v in other.labels.items():
+                            miscellaneous.labels[k] = v
+                t.add_child(int(i), Thought({}, 0, t, "Other"))
             return t
 
         f = open(load_path, 'r')

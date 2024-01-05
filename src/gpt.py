@@ -33,8 +33,8 @@ class GPT(object):
         prompt = self.prompt_template.format(num_plans=num_plans, cat_name=cat_name, sample=self.prompt_sample, input=str(labels_copy))
         return prompt
 
-    def generate(self, labels, num_plans=2, num_categories=2, n=1, stop=None):
-        prompt = self.construct_prompt(labels, num_plans, num_categories)
+    def generate(self, labels, num_plans=2, cat_name="Thing", n=1, stop=None):
+        prompt = self.construct_prompt(labels, num_plans, cat_name)
         messages = [
             {"role": "system", "content": 'You are a helpful assistant and have knowledge of Python. Your response should be in JSON format.'},
             {"role": "user", "content": prompt}
@@ -59,33 +59,17 @@ class GPT(object):
 
         return outputs
 
-    def gen_plans(self, contents, node_dict, label_to_wnid, labels):
+    def gen_plans(self, contents):
         contents = contents[0]
         contents = contents.replace('\n', '')
         contents = json.loads(contents)
         print(contents)
 
-        plans, plans_w = [], []
+        plans = []
         for content in contents.values():
-            # plans.append(content)
-            plan = {}
-            plan_w = {}
-            for name, label_ids in content.items():
-                plan[name] = []
-                plan_w[name] = []
-                for label_id in label_ids:
-                    if label_id not in labels:
-                        continue
-                    plan[name].append(label_id)
-                    plan_w[name].append(node_dict[label_to_wnid[labels[label_id]]].weight)
-                if plan_w[name] == []:
-                    del plan[name]
-                    del plan_w[name]
-            if plan != {}:
-                plans.append(plan)
-                plans_w.append(plan_w)
+            plans.append(content)
 
-        return plans, plans_w
+        return plans
 
 
 class FakeGPT(GPT):

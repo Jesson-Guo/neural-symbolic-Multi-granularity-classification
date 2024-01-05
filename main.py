@@ -125,12 +125,11 @@ def train(tot, model, criterion, optimizer, scheduler, train_loader, num_classes
             if mode == "tot":
                 tot.clean()
                 outputs, penalty = train_one_batch(x, targets, model, criterion, tot.root, num_classes, device)
+                loss = criterion(outputs, targets, norm=True)
+                loss += penalty
             elif mode == "baseline":
                 outputs = model(x)
-                penalty = 0
-
-            loss = criterion(outputs, targets, norm=True)
-            loss += penalty
+                loss = criterion(outputs, targets)
 
             acc1, acc2 = accuracy(outputs, targets, topk=(1, 5))
             acc[0] += acc1
@@ -189,7 +188,7 @@ def main(args):
     # 这里可以考虑一下是否固定叶子的weight，直接用预训练的参数还是重新训练
     # 这是不固定，重新训练
     num_coarses, leaf_to_coarse = get_coarse_num(tot.root, cfg.DATA.NUMBER_CLASSES)
-    cfg.DATA.NUMBER_CLASSES += num_coarses
+    # cfg.DATA.NUMBER_CLASSES += num_coarses
 
     model = ViT(cfg)
     model = model.to(device)
@@ -207,14 +206,15 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    train(tot, model, criterion, optimizer, scheduler, train_loader, cfg.DATA.NUMBER_CLASSES, args.epochs, device, mode="tot")
+    train(tot, model, criterion, optimizer, scheduler, train_loader, cfg.DATA.NUMBER_CLASSES, args.epochs, device, mode="baseline")
 
     path_manager = PathManager()
     path_manager.register_handler(HTTPURLHandler())
-    save_file = os.path.join(cfg.OUTPUT_DIR, "cifar10.pth")
+    save_file = os.path.join(cfg.OUTPUT_DIR, "base_cifar10.pth")
     data = {"model": model.state_dict()}
     with path_manager.open(save_file, "wb") as f:
         torch.save(data, cast(IO[bytes], f))
+    print("training over")
 
 
 if __name__ == "__main__":

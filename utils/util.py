@@ -65,9 +65,9 @@ def get_coarse_labels(root):
     while len(ts):
         t = ts.pop()
         if len(t.labels) != 1:
-            if t.name[-1] not in coarse:
-                coarse[t.name[-1]] = []
-            coarse[t.name[-1]].append(t.labels)
+            if t.name not in coarse:
+                coarse[t.name] = []
+            coarse[t.name].append(t.labels)
             for _ in t.plans.values():
                 for child in _:
                     ts.append(child)
