@@ -16,6 +16,7 @@ from src.dataloader import create_val_dataloader, create_train_dataloader
 from src.node import build_tree, init_weight
 from src.tot.infer import solve
 from src.tot.tot import ToT
+from src.tot.builder import ToTBuilder
 from src.vpt.models.vit_models import ViT
 from src.vpt.configs.config import get_cfg
 from src.solver.loss import PsychoCrossEntropy
@@ -109,7 +110,7 @@ def train(tot, model, criterion, optimizer, scheduler, train_loader, num_classes
     batch_time = AverageMeter()
     acc = torch.zeros(2).to(device)
 
-    if mode == "baseline":
+    if mode == "vpt":
         criterion = nn.CrossEntropyLoss()
 
     for epoch in range(total_epoch):
@@ -127,7 +128,7 @@ def train(tot, model, criterion, optimizer, scheduler, train_loader, num_classes
                 outputs, penalty = train_one_batch(x, targets, model, criterion, tot.root, num_classes, device)
                 loss = criterion(outputs, targets, norm=True)
                 loss += penalty
-            elif mode == "baseline":
+            elif mode == "vpt":
                 outputs = model(x)
                 loss = criterion(outputs, targets)
 
@@ -178,17 +179,19 @@ def main(args):
     train_loader = create_train_dataloader(args)
     val_loader = create_val_dataloader(args)
 
-    node_dict, label_to_wnid, label_to_id, labels, _ = build_tree(args, val_loader.dataset.class_to_idx)
+    _, _, _, labels, _ = build_tree(args, val_loader.dataset.class_to_idx)
 
     sim_func = getattr(metrics, args.sim)
     plan_func = getattr(metrics, args.plan)
-    tot = ToT(plan_func, sim_func)
-    tot.load(args.load, labels)
+    builder = ToTBuilder(2, plan_func)
+    tot = ToT(sim_func)
+    tot.root = builder.load(args.load, labels)
 
     # 这里可以考虑一下是否固定叶子的weight，直接用预训练的参数还是重新训练
     # 这是不固定，重新训练
     num_coarses, leaf_to_coarse = get_coarse_num(tot.root, cfg.DATA.NUMBER_CLASSES)
-    # cfg.DATA.NUMBER_CLASSES += num_coarses
+    if args.method == "tot":
+        cfg.DATA.NUMBER_CLASSES += num_coarses
 
     model = ViT(cfg)
     model = model.to(device)
@@ -206,11 +209,11 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    train(tot, model, criterion, optimizer, scheduler, train_loader, cfg.DATA.NUMBER_CLASSES, args.epochs, device, mode="baseline")
+    train(tot, model, criterion, optimizer, scheduler, train_loader, cfg.DATA.NUMBER_CLASSES, args.epochs, device, mode=args.method)
 
     path_manager = PathManager()
     path_manager.register_handler(HTTPURLHandler())
-    save_file = os.path.join(cfg.OUTPUT_DIR, "base_cifar10.pth")
+    save_file = os.path.join(cfg.OUTPUT_DIR, f"{args.method}_{args.data}.pth")
     data = {"model": model.state_dict()}
     with path_manager.open(save_file, "wb") as f:
         torch.save(data, cast(IO[bytes], f))
@@ -227,6 +230,7 @@ if __name__ == "__main__":
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
     parser.add_argument('--root', type=str, default='/path/to/dataset', help='dataset path')
     parser.add_argument('--data', type=str, default='imagenet', help='dataset name')
+    parser.add_argument('--method', type=str, default='tot', help='dataset name')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
     parser.add_argument('--backend', type=str, default='gpt-4-1106-preview', help='gpt model')

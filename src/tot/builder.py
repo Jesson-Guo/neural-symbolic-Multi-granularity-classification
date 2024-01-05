@@ -6,12 +6,11 @@ import numpy as np
 
 from src.gpt import GPT
 from utils.util import Result
-from src.tot.tot import Thought, ToT
+from src.tot.tot import Thought
 
 
 class ToTBuilder:
-    def __init__(self, tot: ToT, num_plans, plan_func) -> None:
-        self.tot = tot
+    def __init__(self, num_plans, plan_func) -> None:
         self.num_plans = num_plans
         self.plan_func = plan_func
 
@@ -195,12 +194,10 @@ class ToTBuilder:
             for i, ts in t_dict["plans"].items():
                 for t_child in ts:
                     child = load_child(t_child)
-                    if child == None:
-                        continue
                     child.parent = t
                     t.add_child(int(i), child)
             return t
 
         f = open(load_path, 'r')
         tot_data = json.load(f)
-        self.root = load_child(tot_data)
+        return load_child(tot_data)
