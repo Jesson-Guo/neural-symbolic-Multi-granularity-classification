@@ -26,6 +26,7 @@ class Thought(object):
         self.plans = {}
         self.name = name
 
+        self.tid = -1
         self.score = None
 
     def is_valid(self):

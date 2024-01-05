@@ -16,12 +16,13 @@ from src.node import build_tree, init_weight
 from src.tot.infer import solve
 from src.tot.tot import ToT
 from src.vpt.models.vit_models import ViT
+from src.vpt.models.mlp import MLP
 from src.vpt.configs.config import get_cfg
 from src.solver.loss import PsychoCrossEntropy
 from src.solver.lr_scheduler import make_scheduler
 from src.solver.optimizer import make_optimizer
 from utils.conf import get_world_size
-from utils.util import get_coarse_labels, AverageMeter, accuracy
+from utils.util import get_thought_num, AverageMeter, accuracy
 
 
 def eval(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot):
@@ -47,7 +48,7 @@ def train_one_batch(x, model, thought, device):
                 for i in range(len(ts)):
                     plan_w[ts[i].name[-1]] = []
                     for item in ts[i].labels.keys():
-                        plan_w[ts[i].name[-1]].append(model.head.last_layer.weight[item])
+                        plan_w[ts[i].name[-1]].append(model.head.last_layer.weight[ts[i].tid])
                 plans.append((plan_w, ts))
 
         for plan_w, ts in plans:
@@ -65,13 +66,16 @@ def train_one_batch(x, model, thought, device):
     return outputs
 
 
-def train(tot, model, criterion, optimizer, scheduler, train_loader, total_epoch, device):
+def train(tot, model, criterion, optimizer, scheduler, train_loader, total_epoch, device, mode="tot"):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
     losses = AverageMeter()
     batch_time = AverageMeter()
     acc = torch.zeros(2).to(device)
+
+    if mode == "baseline":
+        criterion = nn.CrossEntropyLoss()
 
     for epoch in range(total_epoch):
         losses.reset()
@@ -83,8 +87,11 @@ def train(tot, model, criterion, optimizer, scheduler, train_loader, total_epoch
             x = x.to(device)
             targets = targets.to(device)
 
-            tot.clean()
-            outputs = train_one_batch(x, model, tot.root, device)
+            if mode == "tot":
+                tot.clean()
+                outputs = train_one_batch(x, model, tot.root, device)
+            elif mode == "baseline":
+                outputs = model(x)
             loss = criterion(outputs, targets)
 
             acc1, acc2 = accuracy(outputs, targets, topk=(1, 5))
@@ -117,8 +124,10 @@ def main(args):
     cudnn.benchmark = True
 
     cfg = get_cfg()
-    cfg.merge_from_file(args.config_file)
+    cfg.merge_from_file(f"./src/vpt/configs/files/prompt/{args.data}.yaml")
     cfg.merge_from_list(args.opts)
+
+    print(cfg)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if args.local_rank != -1:
@@ -146,6 +155,15 @@ def main(args):
     tot = ToT(plan_func, sim_func)
     tot.load(args.load, labels)
 
+    num_thoughts = get_thought_num(tot.root)
+    # 这里可以考虑一下是否固定叶子的weight，直接用预训练的参数还是重新训练
+    # 这是不固定，重新训练
+    model.head = MLP(
+        input_dim=model.feat_dim,
+        mlp_dims=[model.feat_dim] * cfg.MODEL.MLP_NUM + [num_thoughts],
+        special_bias=True
+    )
+
     if get_world_size() > 1:
         model = nn.parallel.DistributedDataParallel(
             model,
@@ -154,11 +172,11 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    # train(tot, model, criterion, optimizer, scheduler, train_loader, args.epochs, device)
+    train(tot, model, criterion, optimizer, scheduler, train_loader, args.epochs, device, mode="tot")
 
     path_manager = PathManager()
     path_manager.register_handler(HTTPURLHandler())
-    save_file = os.path.join(cfg.OUTPUT_DIR, "cifar10.pth")
+    save_file = os.path.join(cfg.OUTPUT_DIR, "base_cifar10.pth")
     data = {"model": model.state_dict()}
     with path_manager.open(save_file, "wb") as f:
         torch.save(data, cast(IO[bytes], f))
@@ -170,10 +188,8 @@ if __name__ == "__main__":
     parser.add_argument('--local_rank', default=os.getenv('LOCAL_RANK', -1), type=int)
     parser.add_argument('--seed', type=int, default=72, help='random seed')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs')
-    parser.add_argument('--model', type=str, default='timm model name', help='model name')
     parser.add_argument('--pretrained', action= "store_true", help = "")
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
-    parser.add_argument('--ckpt', type=str, default='/path/to/checkpoint', help='path of model checkpoint')
     parser.add_argument('--root', type=str, default='/path/to/dataset', help='dataset path')
     parser.add_argument('--data', type=str, default='imagenet', help='dataset name')
     parser.add_argument('--classes', type=int, default=1000, help='number of classes')
@@ -186,7 +202,6 @@ if __name__ == "__main__":
     parser.add_argument('--save', type=str, default='/path/to/save', help='thought file path')
     parser.add_argument('--load', type=str, default='', help='thought file path')
     parser.add_argument('--words', type=str, default='/path/to/words', help='words file path')
-    parser.add_argument("--config-file", default="", metavar="FILE", help="path to config file")
     parser.add_argument(
         "opts",
         help="Modify config options using the command-line",

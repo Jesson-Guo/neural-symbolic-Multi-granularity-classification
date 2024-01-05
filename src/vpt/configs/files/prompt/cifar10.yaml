@@ -5,8 +5,16 @@ DATA:
   DATAPATH: ""
   NUMBER_CLASSES: 10
   MULTILABEL: False
+  BATCH_SIZE: 64
+  FEATURE: "sup_vitb16_imagenet21k"
 MODEL:
   TYPE: "vit"
+  MODEL_ROOT: "./weights"
+  PROMPT:
+    DEEP: True
+    DROPOUT: 0.1
+    NUM_TOKENS: 10
 SOLVER:
   BASE_LR: 0.1
   WEIGHT_DECAY: 0.01
+OUTPUT_DIR: "./output"

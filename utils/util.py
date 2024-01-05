@@ -73,3 +73,21 @@ def get_coarse_labels(root):
                     ts.append(child)
                     cnt += 1
     return coarse
+
+
+def get_coarse_num(root):
+    num_coarse = -1
+    num_fine = 0
+
+    ts = [root]
+    while len(ts):
+        t = ts.pop()
+        if t.stop():
+            continue
+        t.tid = num_coarse
+        num_coarse += 1
+        for _ in t.plans.values():
+            for child in _:
+                ts.insert(0, child)
+
+    return num_coarse
