@@ -90,6 +90,7 @@ class ToTBuilder:
         return plans_w
 
     def build_on_gpt(self, labels, weights, gpt: GPT, save_path, load_path=""):
+        # 需要设置中间节点的数量上限！！！！
         try:
             cnt = 0
             plan_dict = {}

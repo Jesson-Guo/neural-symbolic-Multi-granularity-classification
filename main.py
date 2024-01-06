@@ -3,6 +3,7 @@ import os
 import random
 import traceback
 import time
+import tqdm
 from iopath.common.file_io import HTTPURLHandler, PathManager
 from typing import Any, cast, Dict, IO
 
@@ -118,8 +119,9 @@ def train(tot, model, criterion, optimizer, scheduler, train_loader, num_classes
         batch_time.reset()
 
         end = time.time()
+        dataloader = tqdm.tqdm(train_loader)
 
-        for idx, (x, targets) in enumerate(train_loader):
+        for idx, (x, targets) in enumerate(dataloader):
             x = x.to(device)
             targets = targets.to(device)
 
@@ -144,7 +146,10 @@ def train(tot, model, criterion, optimizer, scheduler, train_loader, num_classes
             batch_time.update(time.time() - end)
             end = time.time()
 
-            print(f"epoch: [{epoch+1}/{total_epoch}]\tbatch: [{idx}]\taverage train loss: {losses.avg}")
+            dataloader.desc = f"\
+                epoch: [{epoch+1}/{total_epoch}]\t\
+                batch: [{idx}/{len(train_loader)}]\t\
+                average train loss: {losses.avg}"
 
         scheduler.step()
 
@@ -155,6 +160,7 @@ def train(tot, model, criterion, optimizer, scheduler, train_loader, num_classes
 
 
 def main(args):
+    print("base和tot都训练了")
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     random.seed(args.seed)
@@ -209,6 +215,7 @@ def main(args):
             # find_unused_parameters=True
         )
 
+    print("training now...")
     train(tot, model, criterion, optimizer, scheduler, train_loader, cfg.DATA.NUMBER_CLASSES, args.epochs, device, mode=args.method)
 
     path_manager = PathManager()
@@ -218,6 +225,7 @@ def main(args):
     with path_manager.open(save_file, "wb") as f:
         torch.save(data, cast(IO[bytes], f))
     print("training over")
+    print("base和tot都训练了")
 
 
 if __name__ == "__main__":
