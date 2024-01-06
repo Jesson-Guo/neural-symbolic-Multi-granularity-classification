@@ -221,5 +221,4 @@ class ToTBuilder:
         label_list = list(root.labels.keys())
         label_list.sort()
         label_str = str(label_list)[1:-1]
-        del plan_dict[label_str]
         return root, plan_dict

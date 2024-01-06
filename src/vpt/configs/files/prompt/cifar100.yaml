@@ -1,5 +1,5 @@
 _BASE_: "../base-prompt.yaml"
-RUN_N_TIMES: 1
+NUM_GPUS: 4
 DATA:
   NAME: "CIFAR100"
   DATAPATH: ""

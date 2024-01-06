@@ -1,4 +1,4 @@
-import json
+import torch
 import copy
 import random
 import traceback
@@ -25,6 +25,7 @@ class Thought(object):
 
         self.tid = -1
         self.score = None
+        self.path_score = None
 
     def is_valid(self):
         return self.feedback > 0
@@ -59,16 +60,18 @@ class ToT:
         while len(thoughts):
             t = thoughts.pop()
             t.score = None
+            t.path_score = None
             for ts in t.plans.values():
                 for i in range(len(ts)):
                     thoughts.append(ts[i])
 
         self.root.score = 1
+        self.root.path_score = 1
 
     def reset(self):
-        thought_dict = {}
+        self.thought_dict, temp = {}, {}
         for k in self.plan_dict.keys():
-            thought_dict[k] = self.num_coarses
+            temp[k] = self.num_coarses
             self.num_coarses += 1
 
         self.num_others = self.num_coarses
@@ -77,6 +80,7 @@ class ToT:
             t = ts.pop()
             if t.stop():
                 t.tid = list(t.labels.keys())[0]
+                self.thought_dict[t.tid] = t
                 continue
 
             for _ in t.plans.values():
@@ -93,7 +97,8 @@ class ToT:
             label_list = list(t.labels.keys())
             label_list.sort()
             label_str = str(label_list)[1:-1]
-            t.tid = thought_dict[label_str]
+            t.tid = temp[label_str]
+            self.thought_dict[t.tid] = t
 
     def estimate_clusters(self, v, plan, plan_w, ts, func):
         similarity = func(v, plan_w)

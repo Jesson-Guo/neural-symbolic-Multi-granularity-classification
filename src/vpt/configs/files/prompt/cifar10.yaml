@@ -1,5 +1,4 @@
 _BASE_: "../base-prompt.yaml"
-RUN_N_TIMES: 1
 DATA:
   NAME: "CIFAR10"
   DATAPATH: ""

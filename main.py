@@ -23,8 +23,8 @@ from src.vpt.configs.config import get_cfg
 from src.solver.loss import PsychoCrossEntropy
 from src.solver.lr_scheduler import make_scheduler
 from src.solver.optimizer import make_optimizer
-from utils.conf import get_world_size
-from utils.util import AverageMeter, accuracy
+from utils.conf import is_main_process
+from utils.util import AverageMeter, accuracy, reduce_mean
 
 
 def eval(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot):
@@ -32,65 +32,86 @@ def eval(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot):
     solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, 8)
 
 
-def train_one_batch(x, targets, model, criterion, thought, num_classes, device):
-    outputs = torch.zeros([x.shape[0], num_classes], dtype=torch.float32).to(device)
+def compute_penalty(x, targets, model, criterion, tot, weight):
     penalty = 0.
+    score_dict = {}
+
+    targets_numpy = targets.clone().detach().cpu()
 
     x, _ = model(x, return_feature=True)
+    out = torch.matmul(x, weight.T)
 
-    thoughts = [thought]
-    while len(thoughts):
-        t = thoughts.pop()
-        if t.stop():
-            label_id = list(t.labels.keys())[0]
-            outputs[:, label_id] += t.score
-
+    for k, _ in tot.plan_dict.items():
         plans = []
         do_loss = []
-        for ts in t.plans.values():
+        for ts in _.values():
             if ts[0].is_valid():
                 plan_w = []
                 for i in range(len(ts)):
-                    plan_w.append(model.head.last_layer.weight[ts[i].tid])
+                    w = weight[ts[i].tid].clone()
+                    plan_w.append(w)
 
                 coarse_targets = torch.ones_like(targets) * (len(ts)-1)
                 if ts[len(ts)-1].name == "Other":
                     do_loss.append(True)
+                    for i in range(targets.shape[0]):
+                        for j in range(len(ts)):
+                            if targets_numpy[i] in ts[j].labels:
+                                coarse_targets[i] = j
+                                break
                 else:
                     do_loss.append(False)
-                for i in range(targets.shape[0]):
-                    for j in range(len(ts)):
-                        if targets[i].item() in ts[j].labels:
-                            coarse_targets[i] = j
-                            break
 
                 plans.append((plan_w, ts, coarse_targets))
 
+        score_dict[k] = []
         for i in range(len(plans)):
             plan_w, ts, coarse_targets = plans[i]
             # choose a plan and calculate score
-            out = torch.zeros([x.shape[0], len(plan_w)], dtype=torch.float32).to(device)
-            for j in range(len(plan_w)):
-                y = plan_w[j].unsqueeze(0)
-                out[:, j] = torch.matmul(x, y.T).squeeze()
+            y = torch.stack(plan_w)
+            out = torch.matmul(x, y.T)
             out = out.softmax(dim=1)
-            try:
-                if do_loss[i]:
-                    penalty += criterion(out, coarse_targets, num_classes=len(ts))
-            except Exception as e:
-                print(e)
-                print(traceback.format_exc())
-                print(t.name)
-                exit(0)
+            if do_loss[i]:
+                penalty += criterion(out, coarse_targets, num_classes=len(ts))
+            score_dict[k].append(out)
+    return penalty, score_dict
+
+
+def train_one_batch(x, targets, model, criterion, tot, num_classes, weight, device):
+    penalty, score_dict = compute_penalty(x, targets, model, criterion, tot, weight)
+
+    outputs = torch.zeros([x.shape[0], num_classes], dtype=torch.float32).to(device)
+    tot.root.score = torch.FloatTensor(1).to(device)
+    tot.root.path_score = torch.FloatTensor(1).to(device)
+
+    thoughts = [tot.root]
+    while len(thoughts):
+        t = thoughts.pop()
+        if t.stop():
+            label_id = list(t.labels.keys())[0]
+            outputs[:, label_id] += t.path_score
+
+        label_list = list(t.labels.keys())
+        label_list.sort()
+        label_str = str(label_list)[1:-1]
+        for i, ts in t.plans.items():
             for j in range(len(ts)):
-                ts[j].score = out[:, j] * t.score
+                score = score_dict[label_str][i][:, j].clone()
+                b = t.path_score.clone()
+                ts[j].path_score = score * b
                 thoughts.append(ts[j])
+
     return outputs, penalty
 
 
-def train(tot, model, criterion, optimizer, scheduler, train_loader, num_classes, total_epoch, device, mode="tot"):
+def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_classes, total_epoch, device, mode="tot"):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+    if cfg.NUM_GPUS > 1:
+        weight = model.module.head.last_layer.weight
+    else:
+        weight = model.head.last_layer.weight
 
     losses = AverageMeter()
     batch_time = AverageMeter()
@@ -112,7 +133,7 @@ def train(tot, model, criterion, optimizer, scheduler, train_loader, num_classes
 
             if mode == "tot":
                 tot.clean()
-                outputs, penalty = train_one_batch(x, targets, model, criterion, tot.root, num_classes, device)
+                outputs, penalty = train_one_batch(x, targets, model, criterion, tot, num_classes, weight, device)
                 loss = criterion(outputs, targets, norm=True)
                 loss += penalty
             elif mode == "vpt":
@@ -123,29 +144,34 @@ def train(tot, model, criterion, optimizer, scheduler, train_loader, num_classes
             acc[0] += acc1
             acc[1] += acc2
 
+            if cfg.NUM_GPUS > 1:
+                torch.distributed.barrier()
+            reduced_loss = reduce_mean(loss, average=True)
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            losses.update(loss.item(), x.shape[0])
+            losses.update(reduced_loss.item(), x.shape[0])
             batch_time.update(time.time() - end)
             end = time.time()
 
-            dataloader.desc = f"\
-                epoch: [{epoch+1}/{total_epoch}]\t\
-                batch: [{idx}/{len(train_loader)}]\t\
-                average train loss: {losses.avg}"
+            if is_main_process():
+                dataloader.desc = f"\
+                    epoch: [{epoch+1}/{total_epoch}]\t\
+                    batch: [{idx+1}/{len(train_loader)}]\t\
+                    average train loss: {losses.avg}"
 
         scheduler.step()
 
         acc = acc / len(train_loader.dataset)
-        print(f'\
-            train top1: {acc[0].item()}\t\
-            train top5: {acc[1].item()}')
+        if is_main_process():
+            print(f'\
+                train top1: {acc[0].item()}\t\
+                train top5: {acc[1].item()}')
 
 
 def main(args):
-    print("base和tot都训练了")
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     random.seed(args.seed)
@@ -156,8 +182,6 @@ def main(args):
     cfg.merge_from_file(f"./src/vpt/configs/files/prompt/{args.data}.yaml")
     cfg.merge_from_list(args.opts)
     cfg.SOLVER.BASE_LR = args.lr / 256 * cfg.DATA.BATCH_SIZE
-
-    print(cfg)
 
     # device = torch.device("cpu")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -175,12 +199,13 @@ def main(args):
     sim_func = getattr(metrics, args.sim)
     plan_func = getattr(metrics, args.plan)
     builder = ToTBuilder(plan_func, num_plans=2, num_coarse=10000, num_k=5)
-    root, plan_dict = builder.load(args.load, labels)
+    root, plan_dict = builder.load(f"./{args.data}-{args.k}.json", labels)
     tot = ToT(sim_func, plan_dict, cfg.DATA.NUMBER_CLASSES, root)
     tot.reset()
 
     # 这里可以考虑一下是否固定叶子的weight，直接用预训练的参数还是重新训练
     # 不固定，重新训练
+    num_classes = cfg.DATA.NUMBER_CLASSES
     cfg.DATA.NUMBER_CLASSES = tot.num_others
 
     model = ViT(cfg)
@@ -189,27 +214,36 @@ def main(args):
     optimizer = make_optimizer([model], cfg.SOLVER)
     scheduler = make_scheduler(optimizer, cfg.SOLVER)
 
-    criterion = PsychoCrossEntropy(cfg.DATA.NUMBER_CLASSES)
+    criterion = PsychoCrossEntropy(num_classes)
 
-    if get_world_size() > 1:
+    if cfg.NUM_GPUS > 1:
         model = nn.parallel.DistributedDataParallel(
             model,
             device_ids=[args.local_rank],
             output_device=args.local_rank,
-            # find_unused_parameters=True
+            find_unused_parameters=True
         )
 
-    print("training now...")
-    train(tot, model, criterion, optimizer, scheduler, train_loader, cfg.DATA.NUMBER_CLASSES, args.epochs, device, mode=args.method)
+    if is_main_process():
+        print(cfg)
+        print("training now...")
+
+    train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_classes, args.epochs, device, mode=args.method)
 
     path_manager = PathManager()
     path_manager.register_handler(HTTPURLHandler())
     save_file = os.path.join(cfg.OUTPUT_DIR, f"{args.method}_{args.data}.pth")
-    data = {"model": model.state_dict()}
-    with path_manager.open(save_file, "wb") as f:
-        torch.save(data, cast(IO[bytes], f))
-    print("training over")
-    print("base和tot都训练了")
+
+    if cfg.NUM_GPUS > 1:
+        data = {"model": model.module.state_dict()}
+    else:
+        data = {"model": model.state_dict()}
+
+    if is_main_process():
+        with path_manager.open(save_file, "wb") as f:
+            torch.save(data, cast(IO[bytes], f))
+        print("training over")
+        print("base和tot都训练了")
 
 
 if __name__ == "__main__":
@@ -230,7 +264,7 @@ if __name__ == "__main__":
     parser.add_argument('--sim', type=str, default='naive_score', help='similarity metrics')
     parser.add_argument('--plan', type=str, default='silhouette_score', help='cluster metrics')
     parser.add_argument('--save', type=str, default='/path/to/save', help='thought file path')
-    parser.add_argument('--load', type=str, default='', help='thought file path')
+    parser.add_argument('--k', type=int, default=5, help='number k')
     parser.add_argument('--words', type=str, default='/path/to/words', help='words file path')
     parser.add_argument(
         "opts",

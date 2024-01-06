@@ -12,7 +12,6 @@ _C = CfgNode()
 
 _C.DBG = False
 _C.OUTPUT_DIR = "./output"
-_C.RUN_N_TIMES = 5
 # Perform benchmarking to select the fastest CUDNN algorithms to use
 # Note that this may increase the memory usage and will likely not result
 # in overall speedups when variable size inputs are used (e.g. COCO training)
