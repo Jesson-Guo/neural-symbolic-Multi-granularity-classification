@@ -27,28 +27,6 @@ from utils.conf import get_world_size
 from utils.util import AverageMeter, accuracy
 
 
-def get_coarse_num(root, num_classes):
-    num_coarse = num_classes-1
-    leaf_to_coarse = {}
-    for i in range(num_classes):
-        leaf_to_coarse[i] = set()
-
-    ts = [root]
-    while len(ts):
-        t = ts.pop()
-        if t.stop():
-            t.tid = list(t.labels.keys())[0]
-            continue
-
-        t.tid = num_coarse
-        num_coarse += 1
-        for _ in t.plans.values():
-            for child in _:
-                ts.insert(0, child)
-
-    return num_coarse-num_classes, leaf_to_coarse
-
-
 def eval(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot):
     init_weight(node_dict['fall11'], 0)
     solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, 8)
@@ -68,6 +46,7 @@ def train_one_batch(x, targets, model, criterion, thought, num_classes, device):
             outputs[:, label_id] += t.score
 
         plans = []
+        do_loss = []
         for ts in t.plans.values():
             if ts[0].is_valid():
                 plan_w = []
@@ -75,23 +54,29 @@ def train_one_batch(x, targets, model, criterion, thought, num_classes, device):
                     plan_w.append(model.head.last_layer.weight[ts[i].tid])
 
                 coarse_targets = torch.ones_like(targets) * (len(ts)-1)
+                if ts[len(ts)-1].name == "Other":
+                    do_loss.append(True)
+                else:
+                    do_loss.append(False)
                 for i in range(targets.shape[0]):
-                    for j in range(len(ts)-1):
-                        if len(ts[j].labels) and targets[i].item() in ts[j].labels:
+                    for j in range(len(ts)):
+                        if targets[i].item() in ts[j].labels:
                             coarse_targets[i] = j
                             break
 
                 plans.append((plan_w, ts, coarse_targets))
 
-        for plan_w, ts, coarse_targets in plans:
+        for i in range(len(plans)):
+            plan_w, ts, coarse_targets = plans[i]
             # choose a plan and calculate score
             out = torch.zeros([x.shape[0], len(plan_w)], dtype=torch.float32).to(device)
-            for i in range(len(plan_w)):
-                y = plan_w[i].unsqueeze(0)
-                out[:, i] = torch.matmul(x, y.T).squeeze()
+            for j in range(len(plan_w)):
+                y = plan_w[j].unsqueeze(0)
+                out[:, j] = torch.matmul(x, y.T).squeeze()
             out = out.softmax(dim=1)
             try:
-                penalty += criterion(out, coarse_targets, num_classes=len(ts))
+                if do_loss[i]:
+                    penalty += criterion(out, coarse_targets, num_classes=len(ts))
             except Exception as e:
                 print(e)
                 print(traceback.format_exc())
@@ -189,15 +174,14 @@ def main(args):
 
     sim_func = getattr(metrics, args.sim)
     plan_func = getattr(metrics, args.plan)
-    builder = ToTBuilder(2, plan_func)
-    tot = ToT(sim_func)
-    tot.root = builder.load(args.load, labels)
+    builder = ToTBuilder(plan_func, num_plans=2, num_coarse=10000, num_k=5)
+    root, plan_dict = builder.load(args.load, labels)
+    tot = ToT(sim_func, plan_dict, cfg.DATA.NUMBER_CLASSES, root)
+    tot.reset()
 
     # 这里可以考虑一下是否固定叶子的weight，直接用预训练的参数还是重新训练
-    # 这是不固定，重新训练
-    num_coarses, leaf_to_coarse = get_coarse_num(tot.root, cfg.DATA.NUMBER_CLASSES)
-    if args.method == "tot":
-        cfg.DATA.NUMBER_CLASSES += num_coarses
+    # 不固定，重新训练
+    cfg.DATA.NUMBER_CLASSES = tot.num_others
 
     model = ViT(cfg)
     model = model.to(device)
@@ -237,7 +221,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=1e-4, help='initial learning rate')
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
     parser.add_argument('--root', type=str, default='/path/to/dataset', help='dataset path')
-    parser.add_argument('--data', type=str, default='imagenet', help='dataset name')
+    parser.add_argument('--data', type=str, default='cifar100', help='dataset name')
     parser.add_argument('--method', type=str, default='tot', help='dataset name')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')

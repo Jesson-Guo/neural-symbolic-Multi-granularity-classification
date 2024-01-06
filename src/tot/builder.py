@@ -10,9 +10,11 @@ from src.tot.tot import Thought
 
 
 class ToTBuilder:
-    def __init__(self, num_plans, plan_func) -> None:
-        self.num_plans = num_plans
+    def __init__(self, plan_func, num_plans=2, num_coarse=100, num_k=2) -> None:
         self.plan_func = plan_func
+        self.num_plans = num_plans
+        self.num_coarse = num_coarse
+        self.num_k = num_k
 
     def estimate_plans(self, plans_w):
         result = []
@@ -64,10 +66,10 @@ class ToTBuilder:
                     plans_t[i]["Miscellaneous"].extend(label_set)
         return plans_t
 
-    def check(self):
-        if self.root == None:
+    def check(self, root):
+        if root == None:
             return 0
-        thoughts = [self.root]
+        thoughts = [root]
         while len(thoughts):
             thought = thoughts.pop()
             for ts in thought.plans.values():
@@ -91,34 +93,37 @@ class ToTBuilder:
 
     def build_on_gpt(self, labels, weights, gpt: GPT, save_path, load_path=""):
         # 需要设置中间节点的数量上限！！！！
+        # 设置叶子节点，当一个thought中少雨k个时直接分类
         try:
             cnt = 0
             plan_dict = {}
             if load_path == "":
-                self.root = Thought(labels, 2, name='Thing')
+                root = Thought(labels, 2, name='Thing')
             else:
-                self.load(load_path, labels)
-            thoughts = [self.root]
+                root, plan_dict = self.load(load_path, labels)
+            thoughts = [root]
 
-            while len(thoughts):
+            while len(thoughts) and len(plan_dict) < self.num_coarse:
                 t = thoughts.pop()
+                label_list = list(t.labels.keys())
+                label_list.sort()
+                label_str = str(label_list)[1:-1]
+
                 if (not t.is_valid()) or t.stop():
                     continue
-                if len(t.labels) == 2 and len(t.plans) == 0:
-                    for k, v in t.labels.keys():
+                if len(t.labels) <= self.num_k and len(t.plans) == 0:
+                    for k, v in t.labels.items():
                         thought = Thought({k: v}, 2, t, v)
                         t.add_child(0, thought)
-                    t.add_child(0, Thought({}, 0, t, "Other"))
+                    plan_dict[label_str] = t.plans
                     continue
                 if len(t.plans) > 0:
+                    plan_dict[label_str] = t.plans
                     for _ in t.plans.values():
                         for child in _:
                             thoughts.insert(0, child)
                     continue
 
-                label_list = list(t.labels.keys())
-                label_list.sort()
-                label_str = str(label_list)[1:-1]
                 if label_str not in plan_dict:
                     contents = gpt.generate(t.labels, num_plans=self.num_plans, cat_name=t.name, n=1)
                     cnt += 1
@@ -152,15 +157,18 @@ class ToTBuilder:
                         t.plans = plan_dict[label_str]
                 if cnt % 10 == 0:
                     self.save(save_path)
-            self.save(save_path)
+            self.save(root, save_path)
+            print(len(plan_dict))
+            return root
         except Exception as e:
-            self.save(save_path)
             print(e)
             print(traceback.format_exc())
+            self.save(root, save_path)
+            exit(0)
 
-    def save(self, save_path):
-        out = self.root.to_dict()
-        que = [(self.root, out)]
+    def save(self, root, save_path):
+        out = root.to_dict()
+        que = [(root, out)]
 
         while len(que):
             t, t_dict = que.pop()
@@ -184,21 +192,34 @@ class ToTBuilder:
             if t_dict["labels"] == "[]":
                 return Thought(labels={}, feedback=0, parent=None, name=t_dict["name"])
             label_list = t_dict["labels"][1:-1].split(',')
-            label_dict = {}
-            for l in label_list:
-                l = int(l.strip())
-                label_dict[l] = labels[l]
+            label_list = [int(l.strip()) for l in label_list]
+            label_list.sort()
+            label_dict = {l: labels[l] for l in label_list}
 
+            label_str = str(label_list)[1:-1]
             t = Thought(labels=label_dict, feedback=t_dict["feedback"], parent=None, name=t_dict["name"])
+            if len(label_dict) == 1:
+                return t
             if "plans" not in t_dict:
                 t_dict["plans"] = {}
+            if label_str in plan_dict:
+                t.plans = plan_dict[label_str]
+                return t
             for i, ts in t_dict["plans"].items():
-                for t_child in ts:
-                    child = load_child(t_child)
+                for j in range(len(ts)):
+                    child = load_child(ts[j])
                     child.parent = t
                     t.add_child(int(i), child)
+            plan_dict[label_str] = t.plans
             return t
 
+        plan_dict = {}
         f = open(load_path, 'r')
         tot_data = json.load(f)
-        return load_child(tot_data)
+        root = load_child(tot_data)
+
+        label_list = list(root.labels.keys())
+        label_list.sort()
+        label_str = str(label_list)[1:-1]
+        del plan_dict[label_str]
+        return root, plan_dict

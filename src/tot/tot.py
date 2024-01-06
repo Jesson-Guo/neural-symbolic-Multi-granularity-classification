@@ -46,9 +46,13 @@ class Thought(object):
 
 
 class ToT:
-    def __init__(self, sim_func) -> None:
+    def __init__(self, sim_func, plan_dict, num_classes, root=None) -> None:
         self.sim_func = sim_func
-        self.root = None
+        self.plan_dict = plan_dict
+        self.num_coarses = num_classes
+        self.root = root
+
+        self.num_others = 0
 
     def clean(self):
         thoughts = [self.root]
@@ -60,6 +64,36 @@ class ToT:
                     thoughts.append(ts[i])
 
         self.root.score = 1
+
+    def reset(self):
+        thought_dict = {}
+        for k in self.plan_dict.keys():
+            thought_dict[k] = self.num_coarses
+            self.num_coarses += 1
+
+        self.num_others = self.num_coarses
+        ts = [self.root]
+        while len(ts):
+            t = ts.pop()
+            if t.stop():
+                t.tid = list(t.labels.keys())[0]
+                continue
+
+            for _ in t.plans.values():
+                for child in _:
+                    ts.insert(0, child)
+
+            if t.name == "Thing":
+                continue
+            if t.name == "Other":
+                t.tid = self.num_others
+                self.num_others += 1
+                continue
+
+            label_list = list(t.labels.keys())
+            label_list.sort()
+            label_str = str(label_list)[1:-1]
+            t.tid = thought_dict[label_str]
 
     def estimate_clusters(self, v, plan, plan_w, ts, func):
         similarity = func(v, plan_w)
