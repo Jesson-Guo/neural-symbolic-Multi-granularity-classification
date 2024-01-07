@@ -11,6 +11,7 @@ MODEL:
   TRANSFER_TYPE: "prompt"
   TYPE: "vit"
   MODEL_ROOT: "./weights"
+  MODEL_NAME: "imagenet21k_ViT-B_16.npz"
   PROMPT:
     DEEP: True
     DROPOUT: 0.1

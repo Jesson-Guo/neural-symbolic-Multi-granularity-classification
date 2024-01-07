@@ -50,7 +50,7 @@ class ToT:
     def __init__(self, sim_func, plan_dict, num_classes, root=None) -> None:
         self.sim_func = sim_func
         self.plan_dict = plan_dict
-        self.num_coarses = num_classes
+        self.num_coarses = 0
         self.root = root
 
         self.num_others = 0
@@ -71,6 +71,7 @@ class ToT:
     def reset(self):
         self.thought_dict, temp = {}, {}
         for k in self.plan_dict.keys():
+            # 需要判断一下root，root tid = -1
             temp[k] = self.num_coarses
             self.num_coarses += 1
 

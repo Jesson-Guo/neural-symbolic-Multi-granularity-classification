@@ -217,8 +217,4 @@ class ToTBuilder:
         f = open(load_path, 'r')
         tot_data = json.load(f)
         root = load_child(tot_data)
-
-        label_list = list(root.labels.keys())
-        label_list.sort()
-        label_str = str(label_list)[1:-1]
         return root, plan_dict
