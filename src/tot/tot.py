@@ -47,7 +47,7 @@ class Thought(object):
 
 
 class ToT:
-    def __init__(self, sim_func, plan_dict, num_classes, root=None) -> None:
+    def __init__(self, sim_func=None, plan_dict=None, root=None) -> None:
         self.sim_func = sim_func
         self.plan_dict = plan_dict
         self.num_coarses = 0

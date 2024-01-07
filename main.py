@@ -20,6 +20,7 @@ from src.solver.lr_scheduler import make_scheduler
 from src.solver.optimizer import make_optimizer
 from utils.conf import is_main_process
 from train import train
+from eval import eval
 
 
 def main(args):
@@ -34,6 +35,7 @@ def main(args):
     cfg.merge_from_list(args.opts)
     cfg.SOLVER.BASE_LR = args.lr / 256 * cfg.DATA.BATCH_SIZE
     cfg.METHOD = args.method
+    cfg.DATA.NUMBER_COARSE = 0
 
     # device = torch.device("cpu")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -46,6 +48,8 @@ def main(args):
     train_loader = create_train_dataloader(args)
     val_loader = create_val_dataloader(args)
 
+    tot = None
+
     if cfg.METHOD == "tot":
         _, _, _, labels, _ = build_tree(args, val_loader.dataset.class_to_idx)
 
@@ -53,7 +57,7 @@ def main(args):
         plan_func = getattr(metrics, args.plan)
         builder = ToTBuilder(plan_func, num_plans=2, num_coarse=10000, num_k=5)
         root, plan_dict = builder.load(f"./{cfg.DATA.NAME}-{args.k}.json", labels)
-        tot = ToT(sim_func, plan_dict, cfg.DATA.NUMBER_CLASSES, root)
+        tot = ToT(sim_func, plan_dict, root)
         tot.reset()
 
         # 这里可以考虑一下是否固定叶子的weight，直接用预训练的参数还是重新训练
@@ -97,7 +101,7 @@ if __name__ == "__main__":
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
     parser.add_argument('--root', type=str, default='/path/to/dataset', help='dataset path')
     parser.add_argument('--data', type=str, default='cifar100', help='dataset name')
-    parser.add_argument('--method', type=str, default='tot', help='dataset name')
+    parser.add_argument('--method', type=str, default='vpt', help='dataset name')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
     parser.add_argument('--backend', type=str, default='gpt-4-1106-preview', help='gpt model')
