@@ -36,6 +36,7 @@ def main(args):
     cfg.SOLVER.BASE_LR = args.lr / 256 * cfg.DATA.BATCH_SIZE
     cfg.METHOD = args.method
     cfg.DATA.NUMBER_COARSE = 0
+    cfg.USE_TIMM = True
 
     # device = torch.device("cpu")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -64,7 +65,16 @@ def main(args):
         # 不固定，重新训练
         cfg.DATA.NUMBER_COARSE = tot.num_others
 
-    model = ViT(cfg)
+    if cfg.USE_TIMM:
+        import timm
+        model = timm.create_model("timm/vit_base_patch16_224.orig_in21k_ft_in1k", pretrained=False)
+        model.head = nn.Linear(model.head.in_features, 100)
+        model.load_state_dict(torch.load("./weights/vit_base_patch16_224_in21k_ft_cifar100.pth", map_location="cpu"))
+        model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
+        for k, p in model.head.named_parameters():
+            p.requires_grad = False
+    else:
+        model = ViT(cfg)
     model = model.to(device)
 
     optimizer = make_optimizer([model], cfg.SOLVER)

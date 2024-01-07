@@ -109,7 +109,12 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
 
             if cfg.METHOD == "tot":
                 tot.clean()
-                x, corase_x = model(x, return_feature=True)
+                if cfg.USE_TIMM:
+                    x = model.forward_features(x)
+                    corase_x = model.head_coarse(x)
+                    x = model.forward_head(x)
+                else:
+                    x, corase_x = model(x, return_feature=True)
                 outputs, loss = train_one_batch(x, corase_x, targets, criterion, tot, num_classes, device)
                 # loss += criterion(outputs, targets, norm=True)
             elif cfg.METHOD == "vpt":
