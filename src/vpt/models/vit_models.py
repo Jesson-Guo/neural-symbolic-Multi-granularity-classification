@@ -79,11 +79,12 @@ class ViT(nn.Module):
             for k, p in self.enc.named_parameters():
                 p.requires_grad = False
 
-        self.head = MLP(
-            input_dim=self.feat_dim,
-            mlp_dims=[self.feat_dim] * cfg.MODEL.MLP_NUM + [cfg.DATA.NUMBER_CLASSES],
-            special_bias=True
-        )
+        # self.head = MLP(
+        #     input_dim=self.feat_dim,
+        #     mlp_dims=[self.feat_dim] * cfg.MODEL.MLP_NUM + [cfg.DATA.NUMBER_CLASSES],
+        #     special_bias=True
+        # )
+        self.head = nn.Linear(self.feat_dim, cfg.DATA.NUMBER_CLASSES)
 
     def forward(self, x, return_feature=False):
         if self.froze_enc and self.enc.training:

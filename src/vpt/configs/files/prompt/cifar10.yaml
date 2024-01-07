@@ -1,6 +1,7 @@
 _BASE_: "../base-prompt.yaml"
+NUM_GPUS: 4
 DATA:
-  NAME: "CIFAR10"
+  NAME: "cifar10"
   DATAPATH: ""
   NUMBER_CLASSES: 10
   MULTILABEL: False

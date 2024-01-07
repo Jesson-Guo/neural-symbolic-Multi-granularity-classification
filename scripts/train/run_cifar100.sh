@@ -1,9 +1,10 @@
 #!/bin/bash
 python main.py \
-        --epochs 30 \
+        --epochs 50 \
         --lr 0.5 \
         --root /root/autodl-tmp/data \
         --method tot \
-        --load /root/mycode/neural-symbolic-Multi-granularity-classification/cifar100.json \
+        --k 10 \
         --data cifar100 \
-        --words /root/autodl-tmp/data/cifar-100-python/words.txt
+        --words /root/autodl-tmp/data/cifar-100-python/words.txt \
+        NUM_GPUS 1

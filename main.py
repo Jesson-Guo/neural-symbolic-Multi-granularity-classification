@@ -32,14 +32,9 @@ def eval(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot):
     solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, 8)
 
 
-def compute_penalty(x, targets, model, criterion, tot, weight):
+def compute_penalty(x, targets, criterion, tot):
     penalty = 0.
     score_dict = {}
-
-    targets_numpy = targets.clone().detach().cpu()
-
-    x, _ = model(x, return_feature=True)
-    out = torch.matmul(x, weight.T)
 
     for k, _ in tot.plan_dict.items():
         plans = []
@@ -48,41 +43,38 @@ def compute_penalty(x, targets, model, criterion, tot, weight):
             if ts[0].is_valid():
                 plan_w = []
                 for i in range(len(ts)):
-                    w = weight[ts[i].tid].clone()
-                    plan_w.append(w)
+                    plan_w.append(x[:, ts[i].tid])
 
                 coarse_targets = torch.ones_like(targets) * (len(ts)-1)
-                if ts[len(ts)-1].name == "Other":
-                    do_loss.append(True)
-                    for i in range(targets.shape[0]):
-                        for j in range(len(ts)):
-                            if targets_numpy[i] in ts[j].labels:
-                                coarse_targets[i] = j
-                                break
-                else:
-                    do_loss.append(False)
+                # if ts[len(ts)-1].name == "Other":
+                #     do_loss.append(True)
+                #     for i in range(targets.shape[0]):
+                #         for j in range(len(ts)):
+                #             if targets[i].item() in ts[j].labels:
+                #                 coarse_targets[i] = j
+                #                 break
+                # else:
+                #     do_loss.append(False)
 
                 plans.append((plan_w, ts, coarse_targets))
 
         score_dict[k] = []
         for i in range(len(plans)):
             plan_w, ts, coarse_targets = plans[i]
-            # choose a plan and calculate score
-            y = torch.stack(plan_w)
-            out = torch.matmul(x, y.T)
-            out = out.softmax(dim=1)
-            if do_loss[i]:
-                penalty += criterion(out, coarse_targets, num_classes=len(ts))
-            score_dict[k].append(out)
+            coarse_x = torch.stack(plan_w).T
+            coarse_out = coarse_x.softmax(dim=1)
+            # if do_loss[i]:
+            #     penalty += criterion(coarse_out, coarse_targets, num_classes=len(ts))
+            score_dict[k].append(coarse_out)
     return penalty, score_dict
 
 
-def train_one_batch(x, targets, model, criterion, tot, num_classes, weight, device):
-    penalty, score_dict = compute_penalty(x, targets, model, criterion, tot, weight)
+def train_one_batch(x, targets, criterion, tot, num_classes, device):
+    penalty, score_dict = compute_penalty(x, targets, criterion, tot)
 
     outputs = torch.zeros([x.shape[0], num_classes], dtype=torch.float32).to(device)
-    tot.root.score = torch.FloatTensor(1).to(device)
-    tot.root.path_score = torch.FloatTensor(1).to(device)
+    tot.root.score = torch.FloatTensor([1]).to(device)
+    tot.root.path_score = torch.FloatTensor([1]).to(device)
 
     thoughts = [tot.root]
     while len(thoughts):
@@ -96,28 +88,27 @@ def train_one_batch(x, targets, model, criterion, tot, num_classes, weight, devi
         label_str = str(label_list)[1:-1]
         for i, ts in t.plans.items():
             for j in range(len(ts)):
-                score = score_dict[label_str][i][:, j].clone()
-                b = t.path_score.clone()
-                ts[j].path_score = score * b
+                score = score_dict[label_str][i][:, j]
+                ts[j].path_score = score * t.path_score
                 thoughts.append(ts[j])
 
     return outputs, penalty
 
 
-def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_classes, total_epoch, device, mode="tot"):
+def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_classes, total_epoch, device):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    if cfg.NUM_GPUS > 1:
-        weight = model.module.head.last_layer.weight
-    else:
-        weight = model.head.last_layer.weight
-
     losses = AverageMeter()
     batch_time = AverageMeter()
+
+    data_len = len(train_loader.dataset)
+    path_manager = PathManager()
+    path_manager.register_handler(HTTPURLHandler())
+    save_file = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-10.pth")
     acc = torch.zeros(2).to(device)
 
-    if mode == "vpt":
+    if cfg.METHOD == "vpt":
         criterion = nn.CrossEntropyLoss()
 
     for epoch in range(total_epoch):
@@ -125,18 +116,20 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
         batch_time.reset()
 
         end = time.time()
-        dataloader = tqdm.tqdm(train_loader)
+        if is_main_process():
+            train_loader = tqdm.tqdm(train_loader)
 
-        for idx, (x, targets) in enumerate(dataloader):
+        for idx, (x, targets) in enumerate(train_loader):
             x = x.to(device)
             targets = targets.to(device)
 
-            if mode == "tot":
+            if cfg.METHOD == "tot":
                 tot.clean()
-                outputs, penalty = train_one_batch(x, targets, model, criterion, tot, num_classes, weight, device)
+                x = model(x)
+                outputs, penalty = train_one_batch(x, targets, criterion, tot, num_classes, device)
                 loss = criterion(outputs, targets, norm=True)
                 loss += penalty
-            elif mode == "vpt":
+            elif cfg.METHOD == "vpt":
                 outputs = model(x)
                 loss = criterion(outputs, targets)
 
@@ -157,18 +150,27 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
             end = time.time()
 
             if is_main_process():
-                dataloader.desc = f"\
+                train_loader.desc = f"\
                     epoch: [{epoch+1}/{total_epoch}]\t\
                     batch: [{idx+1}/{len(train_loader)}]\t\
                     average train loss: {losses.avg}"
 
         scheduler.step()
 
-        acc = acc / len(train_loader.dataset)
+        acc = reduce_mean(acc, average=False)
+        acc = acc / data_len
         if is_main_process():
             print(f'\
                 train top1: {acc[0].item()}\t\
                 train top5: {acc[1].item()}')
+
+            if cfg.NUM_GPUS > 1:
+                data = {"model": model.module.state_dict()}
+            else:
+                data = {"model": model.state_dict()}
+
+            with path_manager.open(save_file, "wb") as f:
+                torch.save(data, cast(IO[bytes], f))
 
 
 def main(args):
@@ -182,6 +184,7 @@ def main(args):
     cfg.merge_from_file(f"./src/vpt/configs/files/prompt/{args.data}.yaml")
     cfg.merge_from_list(args.opts)
     cfg.SOLVER.BASE_LR = args.lr / 256 * cfg.DATA.BATCH_SIZE
+    cfg.METHOD = args.method
 
     # device = torch.device("cpu")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -221,29 +224,15 @@ def main(args):
             model,
             device_ids=[args.local_rank],
             output_device=args.local_rank,
-            find_unused_parameters=True
+            # find_unused_parameters=True
         )
 
     if is_main_process():
         print(cfg)
         print("training now...")
 
-    train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_classes, args.epochs, device, mode=args.method)
-
-    path_manager = PathManager()
-    path_manager.register_handler(HTTPURLHandler())
-    save_file = os.path.join(cfg.OUTPUT_DIR, f"{args.method}_{args.data}.pth")
-
-    if cfg.NUM_GPUS > 1:
-        data = {"model": model.module.state_dict()}
-    else:
-        data = {"model": model.state_dict()}
-
-    if is_main_process():
-        with path_manager.open(save_file, "wb") as f:
-            torch.save(data, cast(IO[bytes], f))
-        print("training over")
-        print("base和tot都训练了")
+    train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_classes, args.epochs, device)
+    print("training over")
 
 
 if __name__ == "__main__":

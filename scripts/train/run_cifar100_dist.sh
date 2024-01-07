@@ -1,7 +1,7 @@
 #!/bin/bash
-python -m torch.distributed.launch --nproc_per_node=4 --master_port 29502 \
+python -m torch.distributed.launch --nproc_per_node=2 --master_port 29501 \
         main.py \
-        --epochs 30 \
+        --epochs 50 \
         --lr 0.5 \
         --root /root/autodl-tmp/data \
         --method tot \
