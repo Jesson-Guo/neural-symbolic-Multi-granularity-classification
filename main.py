@@ -105,7 +105,7 @@ def main(args):
         train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, cfg.DATA.NUMBER_CLASSES, args.epochs, device)
         print("training over")
     elif args.test:
-        eval(cfg, tot, model, val_loader, device)
+        eval(cfg, tot, model, val_loader, 8, device)
         print("testing over")
 
 

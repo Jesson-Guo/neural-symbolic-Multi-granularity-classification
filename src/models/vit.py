@@ -13,11 +13,11 @@ class TimmViT(timm.models.vision_transformer.VisionTransformer):
         for k, p in self.named_parameters():
             p.requires_grad = False
 
-    def forward(self, x):
+    def forward(self, x, return_feature=True):
         x = self.forward_features(x)
         x = self.forward_head(x, pre_logits=True)
         out = self.head(x)
-        if self.head_coarse == None:
+        if not return_feature:
             return out
         coarse_out = self.head_coarse(x)
         return out, coarse_out

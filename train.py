@@ -98,10 +98,7 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
 
             if cfg.METHOD == "tot":
                 tot.clean()
-                if cfg.NAIVE:
-                    x, corase_x = model(x)
-                else:
-                    x, corase_x = model(x, return_feature=True)
+                x, corase_x = model(x, return_feature=True)
                 x = torch.cat([x, corase_x], dim=1)
                 outputs, loss = train_one_batch(x, targets, criterion, tot, num_classes, device)
                 loss += criterion(outputs, targets, norm=True)

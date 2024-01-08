@@ -7,7 +7,7 @@ from utils.util import accuracy, reduce_mean
 
 
 @torch.no_grad()
-def eval(cfg, tot, model, val_loader, node_dict, label_to_wnid, label_to_id, alpha, device):
+def eval(cfg, tot, model, val_loader, alpha, device):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
@@ -23,14 +23,9 @@ def eval(cfg, tot, model, val_loader, node_dict, label_to_wnid, label_to_id, alp
 
         if cfg.METHOD == "tot":
             tot.clean()
-            if cfg.NAIVE:
-                x, corase_x = model(x)
-            else:
-                x, corase_x = model(x, return_feature=True)
-            pred = torch.zeros(x.shape[0]).to(device)
-            for i in range(x.shape[0]):
-                _, label = tot.solve(x[i].data, node_dict, label_to_wnid, alpha, method='dfs')
-                pred[i] = label_to_id[label]
+            x, corase_x = model(x, return_feature=True)
+            x = torch.cat([x, corase_x], dim=1)
+            outputs = tot.solve(x, alpha, method='dfs')
         elif cfg.METHOD == "vpt":
             outputs = model(x)
 

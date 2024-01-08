@@ -118,7 +118,7 @@ class ToT:
         dq.append((self.root, result))
         ok = False
         pred = -1
-        while not ok and not dq.empty():
+        while not ok and len(dq):
             t, r = dq.pop()
             if t.stop():
                 score = x[idx, t.tid]
@@ -141,6 +141,7 @@ class ToT:
                 tt = self.thought_dict[tids[pred]]
                 res = Result(tt.name, STATUS[tt.feedback], scores[pred], r)
                 dq.append((tt, res))
+        return pred, result
 
 
     def bfs(self, v, node_dict, label_to_wnid, alpha, thought: Thought):
@@ -160,7 +161,9 @@ class ToT:
         #         thoughts.append(child)
         # return name
 
-    def solve(self, v, node_dict, label_to_wnid, alpha, method='dfs'):
+    def solve(self, x, alpha, method='dfs'):
         method = getattr(self, method)
-        output = method(v, node_dict, label_to_wnid, alpha, self.root)
-        return output
+        outputs = torch.LongTensor((x.shape[0]))
+        for i in range(x.shape[0]):
+            outputs[i], _ = method(i, x, alpha)
+        return outputs
