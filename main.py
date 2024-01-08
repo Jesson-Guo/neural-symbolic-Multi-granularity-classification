@@ -66,13 +66,11 @@ def main(args):
         cfg.DATA.NUMBER_COARSE = tot.num_others
 
     if cfg.USE_TIMM:
-        import timm
-        model = timm.create_model("timm/vit_base_patch16_224.orig_in21k_ft_in1k", pretrained=False)
-        model.head = nn.Linear(model.head.in_features, 100)
+        from src.models.vit import ViT
+        model = ViT(cfg, load_pretrain=False)
         model.load_state_dict(torch.load("./weights/vit_base_patch16_224_in21k_ft_cifar100.pth", map_location="cpu"))
+        model.freeze()
         model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
-        for k, p in model.head.named_parameters():
-            p.requires_grad = False
     else:
         model = ViT(cfg)
     model = model.to(device)
@@ -111,7 +109,7 @@ if __name__ == "__main__":
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
     parser.add_argument('--root', type=str, default='/path/to/dataset', help='dataset path')
     parser.add_argument('--data', type=str, default='cifar100', help='dataset name')
-    parser.add_argument('--method', type=str, default='vpt', help='dataset name')
+    parser.add_argument('--method', type=str, default='tot', help='dataset name')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
     parser.add_argument('--backend', type=str, default='gpt-4-1106-preview', help='gpt model')
