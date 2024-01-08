@@ -1,5 +1,5 @@
 #!/bin/bash
-python -m torch.distributed.launch --nproc_per_node=3 --master_port 29501 \
+python -m torch.distributed.launch --nproc_per_node=4 --master_port 29501 \
         main.py \
         --epochs 50 \
         --lr 0.0005 \

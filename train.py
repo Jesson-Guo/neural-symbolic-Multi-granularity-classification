@@ -76,12 +76,10 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
     batch_time = AverageMeter()
 
     data_len = len(train_loader.dataset)
-    path_manager = PathManager()
-    path_manager.register_handler(HTTPURLHandler())
     save_file = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}.pth")
     acc = torch.zeros(2).to(device)
 
-    if cfg.METHOD == "vpt":
+    if cfg.METHOD == "vit":
         criterion = nn.CrossEntropyLoss()
 
     for epoch in range(total_epoch):
@@ -137,10 +135,14 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
                 train top1: {acc[0].item()}\t\
                 train top5: {acc[1].item()}')
 
+            state = {
+                "epoch": epoch,
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict()
+            }
             if cfg.NUM_GPUS > 1:
-                data = {"model": model.module.state_dict()}
+                state = {"model": model.module.state_dict()}
             else:
-                data = {"model": model.state_dict()}
+                state = {"model": model.state_dict()}
 
-            with path_manager.open(save_file, "wb") as f:
-                torch.save(data, cast(IO[bytes], f))
+            torch.save(state, save_file)

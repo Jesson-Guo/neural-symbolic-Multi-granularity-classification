@@ -118,12 +118,16 @@ class ToT:
         dq.append((self.root, result))
         ok = False
         pred = -1
+        # candidates 可以设置一个阈值
+        candidates = {"score": [], "tids": []}
         while not ok and len(dq):
             t, r = dq.pop()
             if t.stop():
                 score = x[idx, t.tid]
                 r_c = Result(t.name, STATUS[t.feedback], score, r)
                 r.add(r_c)
+                candidates["score"].append(score)
+                candidates["tids"].append(t.tid)
                 if score > alpha:
                     ok = True
                     pred = t.tid
@@ -135,16 +139,20 @@ class ToT:
 
             for caches in self.thought_cache[label_str].values():
                 tids = caches["tids"]
-                scores = x[idx, tids]
+                scores = x[idx, tids].unsqueeze(0)
                 out = scores.softmax(dim=1)
                 pred = out.data.max(1)[1].item()
                 tt = self.thought_dict[tids[pred]]
-                res = Result(tt.name, STATUS[tt.feedback], scores[pred], r)
+                res = Result(tt.name, STATUS[tt.feedback], scores[0, pred].data.item(), r)
+                r.add(res)
                 dq.append((tt, res))
+        if not ok:
+            a = torch.stack(candidates["score"]).argmax()
+            pred = candidates["tids"][a]
         return pred, result
 
 
-    def bfs(self, v, node_dict, label_to_wnid, alpha, thought: Thought):
+    def bfs(self, idx, x, alpha):
         pass
         # result = Result(thought.name, STATUS[thought.feedback])
         # thoughts = [thought]
@@ -163,7 +171,7 @@ class ToT:
 
     def solve(self, x, alpha, method='dfs'):
         method = getattr(self, method)
-        outputs = torch.LongTensor((x.shape[0]))
+        pred = torch.LongTensor((x.shape[0])).to(x.device)
         for i in range(x.shape[0]):
-            outputs[i], _ = method(i, x, alpha)
-        return outputs
+            pred[i], _ = method(i, x, alpha)
+        return pred

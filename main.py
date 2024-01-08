@@ -45,6 +45,9 @@ def main(args):
     cfg.K = args.k
     if cfg.NUM_GPUS > 1:
         cfg.OUTPUT_DIR = os.path.join(cfg.OUTPUT_DIR, "dist")
+    if args.test:
+        cfg.MODEL.MODEL_ROOT = "./output/dist"
+        cfg.MODEL.MODEL_NAME = f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}.pth"
 
     # device = torch.device("cpu")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -75,11 +78,18 @@ def main(args):
 
     if cfg.NAIVE:
         model = TimmViT(cfg, load_pretrain=False)
-        model.load_state_dict(torch.load(os.path.join(cfg.MODEL.MODEL_ROOT, cfg.MODEL.MODEL_NAME), map_location="cpu"))
         if not cfg.MODEL.TRANSFER_TYPE == "linear":
             model.freeze()
-        if cfg.DATA.NUMBER_COARSE:
-            model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
+        data = torch.load(os.path.join(cfg.MODEL.MODEL_ROOT, cfg.MODEL.MODEL_NAME), map_location="cpu")
+        if args.test:
+            data = data['model']
+            if cfg.DATA.NUMBER_COARSE:
+                model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
+            model.load_state_dict(data)
+        else:
+            model.load_state_dict(data)
+            if cfg.DATA.NUMBER_COARSE:
+                model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
     else:
         model = ViT(cfg)
     model = model.to(device)
@@ -105,7 +115,8 @@ def main(args):
         train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, cfg.DATA.NUMBER_CLASSES, args.epochs, device)
         print("training over")
     elif args.test:
-        eval(cfg, tot, model, val_loader, 8, device)
+        # for a in range(9, 15):
+        eval(cfg, tot, model, val_loader, 1000, device)
         print("testing over")
 
 
@@ -128,6 +139,7 @@ if __name__ == "__main__":
     parser.add_argument('--plan', type=str, default='silhouette_score', help='cluster metrics')
     parser.add_argument('--save', type=str, default='/path/to/save', help='thought file path')
     parser.add_argument('--k', type=int, default=5, help='number k')
+    parser.add_argument('--alpha', type=int, default=10, help='number k')
     parser.add_argument('--words', type=str, default='/path/to/words', help='words file path')
     parser.add_argument('--train', action= "store_true", help = "")
     parser.add_argument('--test', action= "store_true", help = "")

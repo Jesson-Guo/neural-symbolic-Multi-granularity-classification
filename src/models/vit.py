@@ -13,7 +13,7 @@ class TimmViT(timm.models.vision_transformer.VisionTransformer):
         for k, p in self.named_parameters():
             p.requires_grad = False
 
-    def forward(self, x, return_feature=True):
+    def forward(self, x, return_feature=False):
         x = self.forward_features(x)
         x = self.forward_head(x, pre_logits=True)
         out = self.head(x)

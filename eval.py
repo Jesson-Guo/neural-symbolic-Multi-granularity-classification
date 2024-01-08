@@ -25,13 +25,13 @@ def eval(cfg, tot, model, val_loader, alpha, device):
             tot.clean()
             x, corase_x = model(x, return_feature=True)
             x = torch.cat([x, corase_x], dim=1)
-            outputs = tot.solve(x, alpha, method='dfs')
-        elif cfg.METHOD == "vpt":
+            pred = tot.solve(x, alpha, method='dfs')
+            acc[0] += pred.eq(targets.data).sum()
+        elif cfg.METHOD == "vit":
             outputs = model(x)
-
-        acc1, acc2 = accuracy(outputs, targets, topk=(1, 5))
-        acc[0] += acc1
-        acc[1] += acc2
+            acc1, acc2 = accuracy(outputs, targets, topk=(1, 5))
+            acc[0] += acc1
+            acc[1] += acc2
 
         if cfg.NUM_GPUS > 1:
             torch.distributed.barrier()
