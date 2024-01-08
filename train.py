@@ -15,6 +15,7 @@ from utils.util import AverageMeter, accuracy, reduce_mean
 def compute_penalty(x, corase_feat, targets, criterion, tot):
     penalty = 0.
     score_dict = {}
+    cnt1, cnt2 = 0, 0
 
     for k, _ in tot.plan_dict.items():
         plans = []
@@ -24,21 +25,23 @@ def compute_penalty(x, corase_feat, targets, criterion, tot):
                 plan_w = []
                 for i in range(len(ts)):
                     if ts[i].stop():
+                        cnt1 += 1
                         w = x[:, ts[i].tid]
                     else:
+                        cnt2 += 1
                         w = corase_feat[:, ts[i].tid]
                     plan_w.append(w)
 
                 coarse_targets = torch.ones_like(targets) * (len(ts)-1)
-                if ts[len(ts)-1].name == "Other":
-                    do_loss.append(True)
-                    for i in range(targets.shape[0]):
-                        for j in range(len(ts)):
-                            if targets[i].item() in ts[j].labels:
-                                coarse_targets[i] = j
-                                break
-                else:
-                    do_loss.append(False)
+                # if ts[len(ts)-1].name == "Other":
+                #     do_loss.append(True)
+                #     for i in range(targets.shape[0]):
+                #         for j in range(len(ts)):
+                #             if targets[i].item() in ts[j].labels:
+                #                 coarse_targets[i] = j
+                #                 break
+                # else:
+                #     do_loss.append(False)
 
                 plans.append((plan_w, ts, coarse_targets))
 
@@ -47,8 +50,8 @@ def compute_penalty(x, corase_feat, targets, criterion, tot):
             plan_w, ts, coarse_targets = plans[i]
             coarse_x = torch.stack(plan_w).T
             coarse_out = coarse_x.softmax(dim=1)
-            if do_loss[i]:
-                penalty += criterion(coarse_out, coarse_targets, num_classes=len(ts))
+            # if do_loss[i]:
+            #     penalty += criterion(coarse_out, coarse_targets, num_classes=len(ts))
             score_dict[k].append(coarse_out)
     return penalty, score_dict
 
@@ -70,11 +73,14 @@ def train_one_batch(x, corase_x, targets, criterion, tot, num_classes, device):
         label_list = list(t.labels.keys())
         label_list.sort()
         label_str = str(label_list)[1:-1]
-        for i, ts in t.plans.items():
-            for j in range(len(ts)):
-                score = score_dict[label_str][i][:, j]
-                ts[j].path_score = score * t.path_score
-                thoughts.append(ts[j])
+        i = 0
+        for ts in t.plans.values():
+            if ts[0].is_valid():
+                for j in range(len(ts)):
+                    score = score_dict[label_str][i][:, j]
+                    ts[j].path_score = score * t.path_score
+                    thoughts.append(ts[j])
+                i += 1
 
     return outputs, penalty
 
@@ -114,7 +120,7 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
                 else:
                     x, corase_x = model(x, return_feature=True)
                 outputs, loss = train_one_batch(x, corase_x, targets, criterion, tot, num_classes, device)
-                # loss += criterion(outputs, targets, norm=True)
+                loss += criterion(outputs, targets, norm=True)
             elif cfg.METHOD == "vpt":
                 outputs = model(x)
                 loss = criterion(outputs, targets)

@@ -36,7 +36,7 @@ def main(args):
     cfg.SOLVER.BASE_LR = args.lr / 256 * cfg.DATA.BATCH_SIZE
     cfg.METHOD = args.method
     cfg.DATA.NUMBER_COARSE = 0
-    cfg.USE_TIMM = True
+    cfg.USE_TIMM = args.use_timm
 
     # device = torch.device("cpu")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -68,7 +68,7 @@ def main(args):
     if cfg.USE_TIMM:
         from src.models.vit import ViT
         model = ViT(cfg, load_pretrain=False)
-        model.load_state_dict(torch.load("./weights/vit_base_patch16_224_in21k_ft_cifar100.pth", map_location="cpu"))
+        model.load_state_dict(torch.load(cfg.MODEL.MODEL_NAME, map_location="cpu"))
         model.freeze()
         model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
     else:
@@ -121,6 +121,7 @@ if __name__ == "__main__":
     parser.add_argument('--words', type=str, default='/path/to/words', help='words file path')
     parser.add_argument('--train', action= "store_true", help = "")
     parser.add_argument('--test', action= "store_true", help = "")
+    parser.add_argument('--use_timm', action= "store_true", help = "")
     parser.add_argument(
         "opts",
         help="Modify config options using the command-line",
