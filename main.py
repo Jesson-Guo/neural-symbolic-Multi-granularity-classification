@@ -57,13 +57,13 @@ def main(args):
         sim_func = getattr(metrics, args.sim)
         plan_func = getattr(metrics, args.plan)
         builder = ToTBuilder(plan_func, num_plans=2, num_coarse=10000, num_k=5)
-        root, plan_dict = builder.load(f"./{cfg.DATA.NAME}-{args.k}.json", labels)
-        tot = ToT(sim_func, plan_dict, root)
+        root, plan_dict = builder.load(f"./tots/no_other/{cfg.DATA.NAME}-{args.k}.json", labels)
+        tot = ToT(cfg.DATA.NUMBER_CLASSES, sim_func, plan_dict, root)
         tot.reset()
 
         # 这里可以考虑一下是否固定叶子的weight，直接用预训练的参数还是重新训练
         # 不固定，重新训练
-        cfg.DATA.NUMBER_COARSE = tot.num_others
+        cfg.DATA.NUMBER_COARSE = tot.num_coarses - cfg.DATA.NUMBER_CLASSES
 
     if cfg.USE_TIMM:
         from src.models.vit import ViT

@@ -47,13 +47,15 @@ class Thought(object):
 
 
 class ToT:
-    def __init__(self, sim_func=None, plan_dict=None, root=None) -> None:
+    def __init__(self, num_classes=0, sim_func=None, plan_dict=None, root=None) -> None:
         self.sim_func = sim_func
         self.plan_dict = plan_dict
-        self.num_coarses = 0
+        self.num_coarses = num_classes
         self.root = root
 
-        self.num_others = 0
+        self.coarse_dict = {}
+        self.fine_dict = {}
+        self.thought_cache = {}
 
     def clean(self):
         thoughts = [self.root]
@@ -69,19 +71,18 @@ class ToT:
         self.root.path_score = 1
 
     def reset(self):
-        self.thought_dict, temp = {}, {}
+        temp = {}
         for k in self.plan_dict.keys():
             # 需要判断一下root，root tid = -1
             temp[k] = self.num_coarses
             self.num_coarses += 1
 
-        self.num_others = self.num_coarses
         ts = [self.root]
         while len(ts):
             t = ts.pop()
             if t.stop():
                 t.tid = list(t.labels.keys())[0]
-                self.thought_dict[t.tid] = t
+                self.fine_dict[t.tid] = t
                 continue
 
             for _ in t.plans.values():
@@ -90,16 +91,25 @@ class ToT:
 
             if t.name == "Thing":
                 continue
-            if t.name == "Other":
-                t.tid = self.num_others
-                self.num_others += 1
-                continue
 
             label_list = list(t.labels.keys())
             label_list.sort()
             label_str = str(label_list)[1:-1]
             t.tid = temp[label_str]
-            self.thought_dict[t.tid] = t
+            self.coarse_dict[t.tid] = t
+
+        del temp
+        for k, plans in self.plan_dict.items():
+            self.thought_cache[k] = {}
+            for i, ts in plans.items():
+                if ts[0].is_valid():
+                    self.thought_cache[k][i] = {"tids": [], "coarse_targets": {}, "do_loss": False}
+                    for j in range(len(ts)):
+                        self.thought_cache[k][i]["tids"].append(ts[j].tid)
+                        for l in ts[j].labels.keys():
+                            self.thought_cache[k][i]["coarse_targets"][l] = j
+                        if not self.thought_cache[k][i]["do_loss"] and not ts[j].stop():
+                            self.thought_cache[k][i]["do_loss"] = True
 
     def estimate_clusters(self, v, plan, plan_w, ts, func):
         similarity = func(v, plan_w)

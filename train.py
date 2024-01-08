@@ -12,52 +12,34 @@ from utils.conf import is_main_process
 from utils.util import AverageMeter, accuracy, reduce_mean
 
 
-def compute_penalty(x, corase_feat, targets, criterion, tot):
+def compute_penalty(x, targets, criterion, tot):
     penalty = 0.
     score_dict = {}
-    cnt1, cnt2 = 0, 0
+    # TODO 检查一下tot.thought_cache全不全
+    for k, caches in tot.thought_cache.items():
+        score_dict[k] = {}
+        for j, cache in caches.items():
+            coarse_targets = []
+            indices = []
+            for i in range(targets.shape[0]):
+                if targets[i].item() in cache["coarse_targets"]:
+                    coarse_targets.append(cache["coarse_targets"][targets[i].item()])
+                    indices.append(i)
 
-    for k, _ in tot.plan_dict.items():
-        plans = []
-        do_loss = []
-        for ts in _.values():
-            if ts[0].is_valid():
-                plan_w = []
-                for i in range(len(ts)):
-                    if ts[i].stop():
-                        cnt1 += 1
-                        w = x[:, ts[i].tid]
-                    else:
-                        cnt2 += 1
-                        w = corase_feat[:, ts[i].tid]
-                    plan_w.append(w)
-
-                coarse_targets = torch.ones_like(targets) * (len(ts)-1)
-                # if ts[len(ts)-1].name == "Other":
-                #     do_loss.append(True)
-                #     for i in range(targets.shape[0]):
-                #         for j in range(len(ts)):
-                #             if targets[i].item() in ts[j].labels:
-                #                 coarse_targets[i] = j
-                #                 break
-                # else:
-                #     do_loss.append(False)
-
-                plans.append((plan_w, ts, coarse_targets))
-
-        score_dict[k] = []
-        for i in range(len(plans)):
-            plan_w, ts, coarse_targets = plans[i]
-            coarse_x = torch.stack(plan_w).T
+            coarse_x = x[indices, :]
+            coarse_x = coarse_x[:, cache["tids"]]
             coarse_out = coarse_x.softmax(dim=1)
-            # if do_loss[i]:
-            #     penalty += criterion(coarse_out, coarse_targets, num_classes=len(ts))
-            score_dict[k].append(coarse_out)
+            coarse_targets = torch.LongTensor(coarse_targets).to(targets.device)
+            if cache["do_loss"]:
+                penalty += criterion(coarse_out, coarse_targets, num_classes=len(cache["tids"]))
+            # 直接给不相关的概率赋值为0？？？
+            out = x[:, cache["tids"]].softmax(dim=1)
+            score_dict[k][j] = out
     return penalty, score_dict
 
 
-def train_one_batch(x, corase_x, targets, criterion, tot, num_classes, device):
-    penalty, score_dict = compute_penalty(x, corase_x, targets, criterion, tot)
+def train_one_batch(x, targets, criterion, tot, num_classes, device):
+    penalty, score_dict = compute_penalty(x, targets, criterion, tot)
 
     outputs = torch.zeros([x.shape[0], num_classes], dtype=torch.float32).to(device)
     tot.root.score = torch.FloatTensor([1]).to(device)
@@ -73,14 +55,12 @@ def train_one_batch(x, corase_x, targets, criterion, tot, num_classes, device):
         label_list = list(t.labels.keys())
         label_list.sort()
         label_str = str(label_list)[1:-1]
-        i = 0
-        for ts in t.plans.values():
+        for i, ts in t.plans.items():
             if ts[0].is_valid():
                 for j in range(len(ts)):
                     score = score_dict[label_str][i][:, j]
                     ts[j].path_score = score * t.path_score
                     thoughts.append(ts[j])
-                i += 1
 
     return outputs, penalty
 
@@ -119,7 +99,8 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
                     x, corase_x = model(x)
                 else:
                     x, corase_x = model(x, return_feature=True)
-                outputs, loss = train_one_batch(x, corase_x, targets, criterion, tot, num_classes, device)
+                x = torch.cat([x, corase_x], dim=1)
+                outputs, loss = train_one_batch(x, targets, criterion, tot, num_classes, device)
                 loss += criterion(outputs, targets, norm=True)
             elif cfg.METHOD == "vpt":
                 outputs = model(x)
