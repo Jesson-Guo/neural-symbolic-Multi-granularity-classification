@@ -26,13 +26,16 @@ def compute_penalty(x, targets, criterion, tot):
                     coarse_targets.append(cache["coarse_targets"][targets[i].item()])
                     indices.append(i)
 
-            coarse_x = x[indices, :]
-            coarse_x = coarse_x[:, cache["tids"]]
-            coarse_out = coarse_x.softmax(dim=1)
-            coarse_targets = torch.LongTensor(coarse_targets).to(targets.device)
-            if cache["do_loss"]:
-                penalty += criterion(coarse_out, coarse_targets, num_classes=len(cache["tids"]))
-            # 直接给不相关的概率赋值为0？？？
+            if len(indices):
+                coarse_x = x[indices, :]
+                coarse_x = coarse_x[:, cache["tids"]]
+                coarse_out = coarse_x.softmax(dim=1)
+                coarse_targets = torch.LongTensor(coarse_targets).to(targets.device)
+                if cache["do_loss"]:
+                    penalty += criterion(coarse_out, coarse_targets, num_classes=len(cache["tids"]))
+                    if torch.isnan(penalty).any():
+                        print("Nan error occurs, please check the values computing loss")
+                        exit(0)
             out = x[:, cache["tids"]].softmax(dim=1)
             score_dict[k][j] = out
     return penalty, score_dict
@@ -49,7 +52,7 @@ def train_one_batch(x, targets, criterion, tot, num_classes, device):
     while len(thoughts):
         t = thoughts.pop()
         if t.stop():
-            label_id = list(t.labels.keys())[0]
+            label_id = t.tid
             outputs[:, label_id] += t.path_score
 
         label_list = list(t.labels.keys())
@@ -75,7 +78,7 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
     data_len = len(train_loader.dataset)
     path_manager = PathManager()
     path_manager.register_handler(HTTPURLHandler())
-    save_file = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-10.pth")
+    save_file = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}.pth")
     acc = torch.zeros(2).to(device)
 
     if cfg.METHOD == "vpt":
@@ -95,14 +98,14 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
 
             if cfg.METHOD == "tot":
                 tot.clean()
-                if cfg.USE_TIMM:
+                if cfg.NAIVE:
                     x, corase_x = model(x)
                 else:
                     x, corase_x = model(x, return_feature=True)
                 x = torch.cat([x, corase_x], dim=1)
                 outputs, loss = train_one_batch(x, targets, criterion, tot, num_classes, device)
                 loss += criterion(outputs, targets, norm=True)
-            elif cfg.METHOD == "vpt":
+            else:
                 outputs = model(x)
                 loss = criterion(outputs, targets)
 

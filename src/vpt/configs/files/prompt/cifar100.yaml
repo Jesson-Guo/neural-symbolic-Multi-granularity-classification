@@ -2,7 +2,7 @@ _BASE_: "../base-prompt.yaml"
 NUM_GPUS: 2
 DATA:
   NAME: "cifar100"
-  DATAPATH: ""
+  ROOT: ""
   NUMBER_CLASSES: 100
   MULTILABEL: False
   BATCH_SIZE: 64
@@ -19,4 +19,4 @@ MODEL:
 SOLVER:
   BASE_LR: 0.05
   WEIGHT_DECAY: 0.01
-OUTPUT_DIR: "./output/dist"
+OUTPUT_DIR: "./output"

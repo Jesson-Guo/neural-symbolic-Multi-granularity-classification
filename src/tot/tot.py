@@ -2,8 +2,10 @@ import torch
 import copy
 import random
 import traceback
+import queue
 import numpy as np
 
+from collections import deque
 from src.gpt import GPT
 from utils.util import Result
 
@@ -53,8 +55,7 @@ class ToT:
         self.num_coarses = num_classes
         self.root = root
 
-        self.coarse_dict = {}
-        self.fine_dict = {}
+        self.thought_dict = {}
         self.thought_cache = {}
 
     def clean(self):
@@ -82,7 +83,7 @@ class ToT:
             t = ts.pop()
             if t.stop():
                 t.tid = list(t.labels.keys())[0]
-                self.fine_dict[t.tid] = t
+                self.thought_dict[t.tid] = t
                 continue
 
             for _ in t.plans.values():
@@ -96,7 +97,7 @@ class ToT:
             label_list.sort()
             label_str = str(label_list)[1:-1]
             t.tid = temp[label_str]
-            self.coarse_dict[t.tid] = t
+            self.thought_dict[t.tid] = t
 
         del temp
         for k, plans in self.plan_dict.items():
@@ -111,84 +112,36 @@ class ToT:
                         if not self.thought_cache[k][i]["do_loss"] and not ts[j].stop():
                             self.thought_cache[k][i]["do_loss"] = True
 
-    def estimate_clusters(self, v, plan, plan_w, ts, func):
-        similarity = func(v, plan_w)
-        idx = similarity.argmin().item()
-        t = ts[idx]
-        score = similarity[idx].item()
-        for name, _ in plan_w.items():
-            if idx == 0:
-                break
-            idx -= 1
-        name_t = copy.deepcopy(t.name)
-        name_t.append(name)
-        return name_t, t, score
+    def dfs(self, idx, x, alpha):
+        dq = deque()
+        result = Result(self.root.name, STATUS[self.root.feedback], 0)
+        dq.append((self.root, result))
+        ok = False
+        pred = -1
+        while not ok and not dq.empty():
+            t, r = dq.pop()
+            if t.stop():
+                score = x[idx, t.tid]
+                r_c = Result(t.name, STATUS[t.feedback], score, r)
+                r.add(r_c)
+                if score > alpha:
+                    ok = True
+                    pred = t.tid
+                continue
 
-    def choose_plan(self, thought: Thought, node_dict, label_to_wnid):
-        plans = []
-        for ts in thought.plans.values():
-            # 启发式的选取，likely即可
-            if ts[0].is_valid():
-                plan, plan_w = {}, {}
-                for t in ts:
-                    plan[t.name] = []
-                    plan_w[t.name] = []
-                    for item in t.labels.values():
-                        plan[t.name].append(item)
-                        plan_w[t.name].append(node_dict[label_to_wnid[item]].weight.data)
-                plans.append((plan, plan_w, ts))
-        random.shuffle(plans)
-        return plans
+            label_list = list(t.labels.keys())
+            label_list.sort()
+            label_str = str(label_list)[1:-1]
 
-    def solve_once(self, v, plan, plan_w, ts):
-        name, t, score = self.estimate_clusters(v, plan, plan_w, ts, self.sim_func)
-        r = Result(name, STATUS[t.feedback], score)
-        return t, r
+            for caches in self.thought_cache[label_str].values():
+                tids = caches["tids"]
+                scores = x[idx, tids]
+                out = scores.softmax(dim=1)
+                pred = out.data.max(1)[1].item()
+                tt = self.thought_dict[tids[pred]]
+                res = Result(tt.name, STATUS[tt.feedback], scores[pred], r)
+                dq.append((tt, res))
 
-    def dfs(self, v, node_dict, label_to_wnid, alpha, thought: Thought):
-        def helper(thought: Thought, res: Result, ok: bool):
-            if not thought.is_valid():
-                return False, None, 1
-            if thought.stop():
-                l = list(thought.labels.values())[0]
-                plan_w = {thought.name: [node_dict[label_to_wnid[l]].weight.data]}
-                similarity = self.sim_func(v, plan_w)
-                score = similarity.min().item()
-                del similarity
-
-                r = Result(thought.name, STATUS[thought.feedback], score, parent=result)
-                res.add(r)
-                return True, l, score
-
-            score = 1
-            label = None
-            plans = self.choose_plan(thought, node_dict, label_to_wnid)
-            for plan, plan_w, ts in plans:
-                t, r = self.solve_once(v, plan, plan_w, ts)
-                res.add(r)
-                if r.score > 0:
-                    r.status = STATUS[0]
-                    continue
-                ok, label, score = helper(t, r, ok)
-                if ok and score < -alpha:
-                    break
-                ok = False
-
-            if label == None:
-                scores = []
-                for i in range(len(res.children)):
-                    scores.append(res.children[i].score)
-                idx = np.argmax(scores)
-                res.children[idx].status = 1
-
-                plan, plan_w, ts = plans[idx]
-                t, r = self.solve_once(v, plan, plan_w, ts)
-                ok, label, score = helper(t, r, ok)
-            return ok, label, score
-
-        result = Result(thought.name, STATUS[thought.feedback], 0)
-        _, label, _ = helper(thought, result, False)
-        return result, label
 
     def bfs(self, v, node_dict, label_to_wnid, alpha, thought: Thought):
         pass

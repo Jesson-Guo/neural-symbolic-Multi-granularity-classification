@@ -186,7 +186,7 @@ class ToTBuilder:
         f.write(out)
         f.close()
 
-    def load(self, load_path, labels):
+    def load(self, labels, load_path):
         def load_child(t_dict):
             assert t_dict["labels"].startswith('[') or t_dict["labels"].endswith(']'), "please check your json file."
             assert not t_dict["labels"] == "[]", "labels is empty, please check your json file."

@@ -1,20 +1,15 @@
-_BASE_: "../base-prompt.yaml"
+_BASE_: "../base-simple.yaml"
 NUM_GPUS: 4
 DATA:
   NAME: "cifar10"
-  ROOT: ""
+  ROOT: "/root/autodl-tmp/data"
   NUMBER_CLASSES: 10
-  MULTILABEL: False
   BATCH_SIZE: 64
-  FEATURE: "sup_vitb16_imagenet21k"
 MODEL:
-  TRANSFER_TYPE: "prompt"
+  TRANSFER_TYPE: "linear"
   TYPE: "vit"
   MODEL_ROOT: "./weights"
-  PROMPT:
-    DEEP: True
-    DROPOUT: 0.1
-    NUM_TOKENS: 10
+  MODEL_NAME: "vit_base_patch16_224_in21k_ft_cifar10.pth"
 SOLVER:
   BASE_LR: 0.05
   WEIGHT_DECAY: 0.01

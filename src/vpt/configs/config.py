@@ -113,7 +113,7 @@ _C.SOLVER.DBG_TRAINABLE = False # if True, will print the name of trainable para
 _C.DATA = CfgNode()
 
 _C.DATA.NAME = ""
-_C.DATA.DATAPATH = ""
+_C.DATA.ROOT = ""
 _C.DATA.FEATURE = ""  # e.g. inat2021_supervised
 
 _C.DATA.PERCENTAGE = 1.0

@@ -1,13 +1,11 @@
 #!/bin/bash
-python -m torch.distributed.launch --nproc_per_node=3 --master_port 29502 \
+python -m torch.distributed.launch --nproc_per_node=3 --master_port 29501 \
         main.py \
-        --epochs 10 \
-        --lr 0.005 \
-        --root /root/autodl-tmp/data \
+        --epochs 50 \
+        --lr 0.0005 \
         --method tot \
         --k 2 \
         --data cifar10 \
         --words /root/autodl-tmp/data/cifar-10-batches-py/words.txt \
         --train \
-        --use_timm \
-        MODEL.MODEL_NAME ./weights/vit_base_patch16_224_in21k_ft_cifar10.pth
+        --naive

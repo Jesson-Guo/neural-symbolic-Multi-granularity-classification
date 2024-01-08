@@ -2,7 +2,6 @@ NUM_GPUS: 1
 NUM_SHARDS: 1
 OUTPUT_DIR: ""
 MODEL:
-  TRANSFER_TYPE: "prompt"
   TYPE: "vit"
   LINEAR:
     MLP_SIZES: []
@@ -16,5 +15,4 @@ DATA:
   NAME: ""
   NUMBER_CLASSES: -1
   ROOT: ""
-  FEATURE: "sup_vitb16_224"
   BATCH_SIZE: 64

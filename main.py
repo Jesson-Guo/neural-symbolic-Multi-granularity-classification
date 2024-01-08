@@ -9,6 +9,7 @@ import torch.utils.data
 import torch.backends.cudnn as cudnn
 
 from utils import metrics
+from src.models.vit import TimmViT
 from src.dataloader import create_val_dataloader, create_train_dataloader
 from src.node import build_tree
 from src.tot.tot import ToT
@@ -31,12 +32,19 @@ def main(args):
     cudnn.benchmark = True
 
     cfg = get_cfg()
-    cfg.merge_from_file(f"./src/vpt/configs/files/prompt/{args.data}.yaml")
+    if args.naive:
+        cfg.merge_from_file(f"./src/vpt/configs/files/simple/{args.data}.yaml")
+    else:
+        cfg.merge_from_file(f"./src/vpt/configs/files/prompt/{args.data}.yaml")
     cfg.merge_from_list(args.opts)
     cfg.SOLVER.BASE_LR = args.lr / 256 * cfg.DATA.BATCH_SIZE
     cfg.METHOD = args.method
     cfg.DATA.NUMBER_COARSE = 0
-    cfg.USE_TIMM = args.use_timm
+    cfg.NAIVE = args.naive
+    cfg.WORKERS = args.workers
+    cfg.K = args.k
+    if cfg.NUM_GPUS > 1:
+        cfg.OUTPUT_DIR = os.path.join(cfg.OUTPUT_DIR, "dist")
 
     # device = torch.device("cpu")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -46,8 +54,8 @@ def main(args):
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
     # 图片统一 224*224（考虑一下32*32）
-    train_loader = create_train_dataloader(args)
-    val_loader = create_val_dataloader(args)
+    train_loader = create_train_dataloader(cfg)
+    val_loader = create_val_dataloader(cfg)
 
     tot = None
 
@@ -57,7 +65,7 @@ def main(args):
         sim_func = getattr(metrics, args.sim)
         plan_func = getattr(metrics, args.plan)
         builder = ToTBuilder(plan_func, num_plans=2, num_coarse=10000, num_k=5)
-        root, plan_dict = builder.load(f"./tots/no_other/{cfg.DATA.NAME}-{args.k}.json", labels)
+        root, plan_dict = builder.load(labels, f"./tots/no_other/{cfg.DATA.NAME}-{cfg.K}.json")
         tot = ToT(cfg.DATA.NUMBER_CLASSES, sim_func, plan_dict, root)
         tot.reset()
 
@@ -65,18 +73,20 @@ def main(args):
         # 不固定，重新训练
         cfg.DATA.NUMBER_COARSE = tot.num_coarses - cfg.DATA.NUMBER_CLASSES
 
-    if cfg.USE_TIMM:
-        from src.models.vit import ViT
-        model = ViT(cfg, load_pretrain=False)
-        model.load_state_dict(torch.load(cfg.MODEL.MODEL_NAME, map_location="cpu"))
-        model.freeze()
-        model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
+    if cfg.NAIVE:
+        model = TimmViT(cfg, load_pretrain=False)
+        model.load_state_dict(torch.load(os.path.join(cfg.MODEL.MODEL_ROOT, cfg.MODEL.MODEL_NAME), map_location="cpu"))
+        if not cfg.MODEL.TRANSFER_TYPE == "linear":
+            model.freeze()
+        if cfg.DATA.NUMBER_COARSE:
+            model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
     else:
         model = ViT(cfg)
     model = model.to(device)
 
-    optimizer = make_optimizer([model], cfg.SOLVER)
-    scheduler = make_scheduler(optimizer, cfg.SOLVER)
+    if args.train:
+        optimizer = make_optimizer([model], cfg.SOLVER)
+        scheduler = make_scheduler(optimizer, cfg.SOLVER)
 
     criterion = PsychoCrossEntropy(cfg.DATA.NUMBER_CLASSES)
 
@@ -121,7 +131,7 @@ if __name__ == "__main__":
     parser.add_argument('--words', type=str, default='/path/to/words', help='words file path')
     parser.add_argument('--train', action= "store_true", help = "")
     parser.add_argument('--test', action= "store_true", help = "")
-    parser.add_argument('--use_timm', action= "store_true", help = "")
+    parser.add_argument('--naive', action= "store_true", help = "")
     parser.add_argument(
         "opts",
         help="Modify config options using the command-line",
