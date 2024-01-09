@@ -1,21 +1,16 @@
 import argparse
-import os
-import random
 import openai
 
 import timm
 import torch
 import torch.nn as nn
 import torch.utils.data
-import torch.backends.cudnn as cudnn
 
 from src.dataloader import create_val_dataloader
 from src.node import build_tree
 from src.gpt import GPT
-from src.tot.infer import solve
 from src.tot.tot import ToT
 from utils import metrics
-from utils.util import get_coarse_labels
 
 
 def main(args):

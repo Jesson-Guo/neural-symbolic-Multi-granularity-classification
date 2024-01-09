@@ -1,6 +1,7 @@
 import os
 import time
 import tqdm
+import shutil
 from iopath.common.file_io import HTTPURLHandler, PathManager
 from typing import cast, IO
 
@@ -10,6 +11,7 @@ import torch.utils.data
 
 from utils.conf import is_main_process
 from utils.util import AverageMeter, accuracy, reduce_mean
+from eval import eval
 
 
 def compute_penalty(x, targets, criterion, tot):
@@ -68,7 +70,7 @@ def train_one_batch(x, targets, criterion, tot, num_classes, device):
     return outputs, penalty
 
 
-def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_classes, total_epoch, device):
+def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_loader, num_classes, total_epoch, alpha, device):
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
@@ -77,12 +79,14 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
 
     data_len = len(train_loader.dataset)
     save_file = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}.pth")
-    acc = torch.zeros(2).to(device)
+    save_best = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}_best.pth")
+    train_acc = torch.zeros(2).to(device)
+    best_acc = 0
 
     if cfg.METHOD == "vit":
         criterion = nn.CrossEntropyLoss()
 
-    for epoch in range(total_epoch):
+    for epoch in range(cfg.start_epoch, total_epoch):
         losses.reset()
         batch_time.reset()
 
@@ -104,9 +108,9 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
                 outputs = model(x)
                 loss = criterion(outputs, targets)
 
-            acc1, acc2 = accuracy(outputs, targets, topk=(1, 5))
-            acc[0] += acc1
-            acc[1] += acc2
+            train_acc1, train_acc2 = accuracy(outputs, targets, topk=(1, 5))
+            train_acc[0] += train_acc1
+            train_acc[1] += train_acc2
 
             if cfg.NUM_GPUS > 1:
                 torch.distributed.barrier()
@@ -128,13 +132,21 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
 
         scheduler.step()
 
-        acc = reduce_mean(acc, average=False)
-        acc = acc / data_len
+        train_acc = reduce_mean(train_acc, average=False)
+        train_acc = train_acc / data_len
+
         if is_main_process():
             print(f'\
-                train top1: {acc[0].item()}\t\
-                train top5: {acc[1].item()}')
+                train top1: {train_acc[0].item()}\t\
+                train top5: {train_acc[1].item()}')
 
+        # eval
+        eval_acc = eval(cfg, tot, model, val_loader, alpha, device)
+        top1 = eval_acc[0].item()
+        is_best = top1 > best_acc
+        best_acc = max(top1, best_acc)
+
+        if is_main_process():
             state = {
                 "epoch": epoch,
                 "optimizer": optimizer.state_dict(),
@@ -146,3 +158,8 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, num_cl
                 state = {"model": model.state_dict()}
 
             torch.save(state, save_file)
+            if is_best:
+                shutil.copyfile(save_file, save_best)
+
+        if cfg.NUM_GPUS > 1:
+            torch.distributed.barrier()

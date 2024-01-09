@@ -1,58 +1,99 @@
 import argparse
 import os
 import random
-import openai
+import numpy as np
 
-import timm
 import torch
 import torch.nn as nn
 import torch.utils.data
 import torch.backends.cudnn as cudnn
 
 from utils import metrics
-from src.dataloader import create_val_dataloader
+from src.models.vit import TimmViT
+from src.dataloader import create_val_dataloader, create_train_dataloader
 from src.node import build_tree
-from src.tot.infer import solve
 from src.tot.tot import ToT
-from utils.conf import get_world_size
-from utils.util import get_coarse_labels
+from src.tot.builder import ToTBuilder
+from src.vpt.models.vit_models import ViT
+from src.vpt.configs.config import get_cfg
+from src.solver.loss import PsychoCrossEntropy
+from src.solver.lr_scheduler import make_scheduler
+from src.solver.optimizer import make_optimizer
+from utils.conf import is_main_process
+from train import train
+from eval import eval
 
 
 def main(args):
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.devices
+
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     random.seed(args.seed)
 
     cudnn.benchmark = True
 
+    cfg = get_cfg()
+    if args.naive:
+        cfg.merge_from_file(f"./src/vpt/configs/files/simple/{args.data}.yaml")
+    else:
+        cfg.merge_from_file(f"./src/vpt/configs/files/prompt/{args.data}.yaml")
+    cfg.merge_from_list(args.opts)
+    cfg.start_epoch = 0
+    cfg.SOLVER.BASE_LR = args.lr / 256 * cfg.DATA.BATCH_SIZE
+    cfg.METHOD = args.method
+    cfg.DATA.NUMBER_COARSE = 0
+    cfg.NAIVE = args.naive
+    cfg.WORKERS = args.workers
+    cfg.K = args.k
+    cfg.MODEL.MODEL_ROOT = "./output/dist"
+    cfg.MODEL.MODEL_NAME = f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}.pth"
+    if cfg.NUM_GPUS > 1:
+        cfg.OUTPUT_DIR = os.path.join(cfg.OUTPUT_DIR, "dist")
+
+    # device = torch.device("cpu")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if args.local_rank != -1:
         torch.cuda.set_device(args.local_rank)
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
-    # model = timm.create_model(
-    #     model_name=args.model,
-    #     pretrained=args.pretrained,
-    #     pretrained_cfg_overlay=dict(file=args.ckpt),
-    #     num_classes=args.classes
-    # ).to(device)
-    model = timm.create_model(args.model, pretrained=False)
-    model.head = nn.Linear(model.head.in_features, args.classes)
-    model.load_state_dict(torch.load(args.ckpt, map_location="cpu"))
+    val_loader = create_val_dataloader(cfg)
+
+    tot = None
+
+    if cfg.METHOD == "tot":
+        _, _, _, labels, _ = build_tree(args, val_loader.dataset.class_to_idx)
+
+        sim_func = getattr(metrics, args.sim)
+        plan_func = getattr(metrics, args.plan)
+        builder = ToTBuilder(plan_func, num_plans=2, num_coarse=10000, num_k=5)
+        root, plan_dict = builder.load(labels, f"./tots/no_other/{cfg.DATA.NAME}-{cfg.K}.json")
+        tot = ToT(cfg.DATA.NUMBER_CLASSES, sim_func, plan_dict, root)
+        tot.reset()
+
+        cfg.DATA.NUMBER_COARSE = tot.num_coarses - cfg.DATA.NUMBER_CLASSES
+
+    data = torch.load(os.path.join(cfg.MODEL.MODEL_ROOT, cfg.MODEL.MODEL_NAME), map_location="cpu")
+    if cfg.NAIVE:
+        model = TimmViT(cfg, load_pretrain=False)
+        if not cfg.MODEL.TRANSFER_TYPE == "linear":
+            model.freeze()
+        if args.resume:
+            data = data['model']
+            if cfg.DATA.NUMBER_COARSE:
+                model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
+            model.load_state_dict(data)
+    else:
+        model = ViT(cfg)
+
+    if args.resume:
+        cfg.start_epoch = data["epoch"]
+
     model = model.to(device)
 
-    val_loader = create_val_dataloader(args)
-
-    state_dict = model.state_dict()
-    node_dict, label_to_wnid, label_to_id, labels, _ = build_tree(args, val_loader.dataset.class_to_idx, state_dict['head.weight'])
-
-    sim_func = getattr(metrics, args.sim)
-    plan_func = getattr(metrics, args.plan)
-    tot = ToT(plan_func, sim_func)
-    tot.load(args.load, labels)
-
-    if get_world_size() > 1:
+    if cfg.NUM_GPUS > 1:
         model = nn.parallel.DistributedDataParallel(
             model,
             device_ids=[args.local_rank],
@@ -60,26 +101,25 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    # solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, 10)
+    if is_main_process():
+        print(cfg)
 
-    coarse = get_coarse_labels(tot.root)
-    for i in range(60, 140):
-        solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot, i/10)
-        print(i/10)
+    eval(cfg, tot, model, val_loader, args.alpha, device)
+    print("testing over")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='image classification with gpt')
 
     parser.add_argument('--local_rank', default=os.getenv('LOCAL_RANK', -1), type=int)
+    parser.add_argument('--devices', default="0", type=str)
     parser.add_argument('--seed', type=int, default=72, help='random seed')
-    parser.add_argument('--model', type=str, default='timm model name', help='model name')
-    parser.add_argument('--pretrained', action= "store_true", help = "")
+    parser.add_argument('--epochs', type=int, default=20, help='number of epochs')
+    parser.add_argument('--lr', type=float, default=1e-4, help='initial learning rate')
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
-    parser.add_argument('--ckpt', type=str, default='/path/to/checkpoint', help='path of model checkpoint')
     parser.add_argument('--root', type=str, default='/path/to/dataset', help='dataset path')
-    parser.add_argument('--data', type=str, default='imagenet', help='dataset name')
-    parser.add_argument('--classes', type=int, default=1000, help='number of classes')
+    parser.add_argument('--data', type=str, default='cifar100', help='dataset name')
+    parser.add_argument('--method', type=str, default='tot', help='dataset name')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
     parser.add_argument('--backend', type=str, default='gpt-4-1106-preview', help='gpt model')
@@ -87,8 +127,17 @@ if __name__ == "__main__":
     parser.add_argument('--sim', type=str, default='naive_score', help='similarity metrics')
     parser.add_argument('--plan', type=str, default='silhouette_score', help='cluster metrics')
     parser.add_argument('--save', type=str, default='/path/to/save', help='thought file path')
-    parser.add_argument('--load', type=str, default='', help='thought file path')
+    parser.add_argument('--k', type=int, default=5, help='number k')
+    parser.add_argument('--alpha', type=int, default=1000, help='number candidates')
     parser.add_argument('--words', type=str, default='/path/to/words', help='words file path')
+    parser.add_argument('--naive', action= "store_true", help = "")
+    parser.add_argument('--resume', action= "store_true", help = "")
+    parser.add_argument(
+        "opts",
+        help="Modify config options using the command-line",
+        default=None,
+        nargs=argparse.REMAINDER,
+    )
 
     args = parser.parse_args()
     main(args)

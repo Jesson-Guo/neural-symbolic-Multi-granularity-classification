@@ -12,7 +12,6 @@ import torch.backends.cudnn as cudnn
 from src.dataloader import create_val_dataloader
 from src.node import build_tree
 from src.gpt import FakeGPT
-from src.tot.infer import solve
 from src.tot.tot import ToT
 from utils import metrics
 from utils.conf import get_world_size
@@ -62,7 +61,7 @@ def main(args):
             # find_unused_parameters=True
         )
 
-    solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot)
+    # solve(model, val_loader, node_dict, label_to_wnid, label_to_id, device, tot)
 
 
 if __name__ == "__main__":

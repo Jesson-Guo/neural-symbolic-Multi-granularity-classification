@@ -116,11 +116,10 @@ class ToT:
         dq = deque()
         result = Result(self.root.name, STATUS[self.root.feedback], 0)
         dq.append((self.root, result))
-        ok = False
         pred = -1
         # candidates 可以设置一个阈值
         candidates = {"score": [], "tids": []}
-        while not ok and len(dq):
+        while len(dq):
             t, r = dq.pop()
             if t.stop():
                 score = x[idx, t.tid]
@@ -128,9 +127,8 @@ class ToT:
                 r.add(r_c)
                 candidates["score"].append(score)
                 candidates["tids"].append(t.tid)
-                if score > alpha:
-                    ok = True
-                    pred = t.tid
+                if len(candidates["score"]) == alpha:
+                    break
                 continue
 
             label_list = list(t.labels.keys())
@@ -146,9 +144,9 @@ class ToT:
                 res = Result(tt.name, STATUS[tt.feedback], scores[0, pred].data.item(), r)
                 r.add(res)
                 dq.append((tt, res))
-        if not ok:
-            a = torch.stack(candidates["score"]).argmax()
-            pred = candidates["tids"][a]
+
+        a = torch.stack(candidates["score"]).argmax()
+        pred = candidates["tids"][a]
         return pred, result
 
 

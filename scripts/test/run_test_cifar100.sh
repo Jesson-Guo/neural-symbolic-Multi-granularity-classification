@@ -1,11 +1,9 @@
 #!/bin/bash
 python main.py \
-        --epochs 50 \
-        --lr 0.0005 \
-        --method tot \
+        --method vit \
         --k 10 \
         --data cifar100 \
         --words /root/autodl-tmp/data/cifar-100-python/words.txt \
-        --train \
+        --test \
         --naive \
         NUM_GPUS 1

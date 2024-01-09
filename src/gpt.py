@@ -6,7 +6,7 @@ from openai import OpenAI
 class GPT(object):
     completion_tokens = 0
     prompt_tokens = 0
-    prompt_sample = '''Input: {0: "airplane", 1: "bird", 2: "dog"} Answer: {"Plan1": {"FlyingObjects": [0, 1], "Pets": [2]}, "Plan2": {"NonHuman": [0, 1], "Pets": [2]}}'''
+    prompt_sample = '''Input: {0: "airplane", 1: "bird", 2: "dog"} Answer: {"Plan1": {"FlyingObjects": [0, 1], "Pets": [2]}, "Plan2": {"Animals": [1, 2], "Vehicles": [0]}}'''
     prompt_template = '''Giving {num_plans} plans to classify all values in set {cat_name} from Input into different sets(at least two sets) with the class name and only word id. \
     Each value can only belong to one set. Empty set is not allowed. \
     {sample} \

@@ -25,6 +25,9 @@ from eval import eval
 
 
 def main(args):
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.devices
+
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     random.seed(args.seed)
@@ -37,6 +40,7 @@ def main(args):
     else:
         cfg.merge_from_file(f"./src/vpt/configs/files/prompt/{args.data}.yaml")
     cfg.merge_from_list(args.opts)
+    cfg.start_epoch = 0
     cfg.SOLVER.BASE_LR = args.lr / 256 * cfg.DATA.BATCH_SIZE
     cfg.METHOD = args.method
     cfg.DATA.NUMBER_COARSE = 0
@@ -45,7 +49,7 @@ def main(args):
     cfg.K = args.k
     if cfg.NUM_GPUS > 1:
         cfg.OUTPUT_DIR = os.path.join(cfg.OUTPUT_DIR, "dist")
-    if args.test:
+    if args.test or args.resume:
         cfg.MODEL.MODEL_ROOT = "./output/dist"
         cfg.MODEL.MODEL_NAME = f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}.pth"
 
@@ -56,7 +60,6 @@ def main(args):
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
-    # 图片统一 224*224（考虑一下32*32）
     train_loader = create_train_dataloader(cfg)
     val_loader = create_val_dataloader(cfg)
 
@@ -76,27 +79,32 @@ def main(args):
         # 不固定，重新训练
         cfg.DATA.NUMBER_COARSE = tot.num_coarses - cfg.DATA.NUMBER_CLASSES
 
+    data = torch.load(os.path.join(cfg.MODEL.MODEL_ROOT, cfg.MODEL.MODEL_NAME), map_location="cpu")
     if cfg.NAIVE:
         model = TimmViT(cfg, load_pretrain=False)
         if not cfg.MODEL.TRANSFER_TYPE == "linear":
             model.freeze()
-        data = torch.load(os.path.join(cfg.MODEL.MODEL_ROOT, cfg.MODEL.MODEL_NAME), map_location="cpu")
-        if args.test:
-            data = data['model']
+        if args.test or args.resume:
             if cfg.DATA.NUMBER_COARSE:
                 model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
-            model.load_state_dict(data)
+            model.load_state_dict(data['model'])
         else:
             model.load_state_dict(data)
             if cfg.DATA.NUMBER_COARSE:
                 model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
     else:
         model = ViT(cfg)
-    model = model.to(device)
 
     if args.train:
         optimizer = make_optimizer([model], cfg.SOLVER)
         scheduler = make_scheduler(optimizer, cfg.SOLVER)
+
+    if args.resume:
+        cfg.start_epoch = data["epoch"]
+        optimizer.load_state_dict(data["optimizer"])
+        scheduler.load_state_dict(data["scheduler"])
+
+    model = model.to(device)
 
     criterion = PsychoCrossEntropy(cfg.DATA.NUMBER_CLASSES)
 
@@ -112,11 +120,10 @@ def main(args):
         print(cfg)
 
     if args.train:
-        train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, cfg.DATA.NUMBER_CLASSES, args.epochs, device)
+        train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_loader, cfg.DATA.NUMBER_CLASSES, args.epochs, args.alpha, device)
         print("training over")
     elif args.test:
-        # for a in range(9, 15):
-        eval(cfg, tot, model, val_loader, 1000, device)
+        eval(cfg, tot, model, val_loader, args.alpha, device)
         print("testing over")
 
 
@@ -124,12 +131,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='image classification with gpt')
 
     parser.add_argument('--local_rank', default=os.getenv('LOCAL_RANK', -1), type=int)
+    parser.add_argument('--devices', default="0", type=str)
     parser.add_argument('--seed', type=int, default=72, help='random seed')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs')
     parser.add_argument('--lr', type=float, default=1e-4, help='initial learning rate')
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
     parser.add_argument('--root', type=str, default='/path/to/dataset', help='dataset path')
-    parser.add_argument('--data', type=str, default='cifar100', help='dataset name')
+    parser.add_argument('--data', type=str, default='cifar10', help='dataset name')
     parser.add_argument('--method', type=str, default='tot', help='dataset name')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
@@ -139,11 +147,12 @@ if __name__ == "__main__":
     parser.add_argument('--plan', type=str, default='silhouette_score', help='cluster metrics')
     parser.add_argument('--save', type=str, default='/path/to/save', help='thought file path')
     parser.add_argument('--k', type=int, default=5, help='number k')
-    parser.add_argument('--alpha', type=int, default=10, help='number k')
+    parser.add_argument('--alpha', type=int, default=-1, help='number candidates')
     parser.add_argument('--words', type=str, default='/path/to/words', help='words file path')
     parser.add_argument('--train', action= "store_true", help = "")
     parser.add_argument('--test', action= "store_true", help = "")
     parser.add_argument('--naive', action= "store_true", help = "")
+    parser.add_argument('--resume', action= "store_true", help = "")
     parser.add_argument(
         "opts",
         help="Modify config options using the command-line",

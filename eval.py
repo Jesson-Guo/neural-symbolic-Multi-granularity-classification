@@ -45,3 +45,4 @@ def eval(cfg, tot, model, val_loader, alpha, device):
         print(f'\
             train top1: {acc[0].item()}\t\
             train top5: {acc[1].item()}')
+    return acc
