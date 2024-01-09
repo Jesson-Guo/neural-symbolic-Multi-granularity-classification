@@ -99,10 +99,10 @@ def main(args):
         optimizer = make_optimizer([model], cfg.SOLVER)
         scheduler = make_scheduler(optimizer, cfg.SOLVER)
 
-    if args.resume:
-        cfg.start_epoch = data["epoch"]
-        optimizer.load_state_dict(data["optimizer"])
-        scheduler.load_state_dict(data["scheduler"])
+    # if args.resume:
+    #     cfg.start_epoch = data["epoch"]
+    #     optimizer.load_state_dict(data["optimizer"])
+    #     scheduler.load_state_dict(data["scheduler"])
 
     model = model.to(device)
 
