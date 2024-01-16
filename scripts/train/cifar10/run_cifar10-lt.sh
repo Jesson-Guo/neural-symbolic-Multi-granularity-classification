@@ -1,10 +1,11 @@
 #!/bin/bash
 python main.py \
-        --epochs 20 \
+        --epochs 30 \
         --lr 0.0005 \
-        --method vit \
+        --method tot \
         --k 2 \
-        --data cifar10 \
+        --data cifar10-lt \
         --words /root/autodl-tmp/data/cifar-10-batches-py/words.txt \
         --train \
-        --naive
+        --naive \
+        NUM_GPUS 1

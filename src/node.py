@@ -91,7 +91,7 @@ def init_weight(node: Node, layer):
 
 def build_tree(args, class_to_idx):
     class_to_idx_t = {}
-    if args.data == 'cifar10' or args.data == 'cifar100':
+    if args.data.startswith('cifar10') or args.data.startswith('cifar100'):
         f = open(args.words, 'r')
         for line in f.readlines():
             line = line.split('\n')[0]

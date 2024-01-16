@@ -43,6 +43,6 @@ def eval(cfg, tot, model, val_loader, alpha, device):
     acc = acc / data_len
     if is_main_process():
         print(f'\
-            train top1: {acc[0].item()}\t\
-            train top5: {acc[1].item()}')
+            val top1: {acc[0].item()}\t\
+            val top5: {acc[1].item()}')
     return acc

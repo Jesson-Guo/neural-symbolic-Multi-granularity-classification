@@ -13,7 +13,7 @@ class PsychoCrossEntropy(nn.Module):
             num_classes = self.num_classes
         if norm:
             x = f.normalize(x, dim=1)
-        x = torch.log(x+1e-5)
+        x = torch.log(x+1e-9)
         y = f.one_hot(y, num_classes)
         loss = y * x
         loss = torch.sum(loss, dim=1)

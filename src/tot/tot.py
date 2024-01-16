@@ -73,8 +73,11 @@ class ToT:
 
     def reset(self):
         temp = {}
+        num_classes = self.num_coarses
         for k in self.plan_dict.keys():
             # 需要判断一下root，root tid = -1
+            if len(k.split(",")) == num_classes:
+                continue
             temp[k] = self.num_coarses
             self.num_coarses += 1
 

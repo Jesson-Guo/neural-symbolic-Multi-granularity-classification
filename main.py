@@ -35,16 +35,12 @@ def main(args):
     cudnn.benchmark = True
 
     cfg = get_cfg()
-    if args.naive:
-        cfg.merge_from_file(f"./src/vpt/configs/files/simple/{args.data}.yaml")
-    else:
-        cfg.merge_from_file(f"./src/vpt/configs/files/prompt/{args.data}.yaml")
+    cfg.merge_from_file(args.config)
     cfg.merge_from_list(args.opts)
     cfg.start_epoch = 0
     cfg.SOLVER.BASE_LR = args.lr / 256 * cfg.DATA.BATCH_SIZE
     cfg.METHOD = args.method
     cfg.DATA.NUMBER_COARSE = 0
-    cfg.NAIVE = args.naive
     cfg.WORKERS = args.workers
     cfg.K = args.k
     if cfg.NUM_GPUS > 1:
@@ -71,7 +67,7 @@ def main(args):
         sim_func = getattr(metrics, args.sim)
         plan_func = getattr(metrics, args.plan)
         builder = ToTBuilder(plan_func, num_plans=2, num_coarse=10000, num_k=5)
-        root, plan_dict = builder.load(labels, f"./tots/no_other/{cfg.DATA.NAME}-{cfg.K}.json")
+        root, plan_dict = builder.load(labels, args.tree)
         tot = ToT(cfg.DATA.NUMBER_CLASSES, sim_func, plan_dict, root)
         tot.reset()
 
@@ -80,20 +76,22 @@ def main(args):
         cfg.DATA.NUMBER_COARSE = tot.num_coarses - cfg.DATA.NUMBER_CLASSES
 
     data = torch.load(os.path.join(cfg.MODEL.MODEL_ROOT, cfg.MODEL.MODEL_NAME), map_location="cpu")
-    if cfg.NAIVE:
+    if args.naive:
         model = TimmViT(cfg, load_pretrain=False)
         if not cfg.MODEL.TRANSFER_TYPE == "linear":
             model.freeze()
         if args.test or args.resume:
             if cfg.DATA.NUMBER_COARSE:
                 model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
-            model.load_state_dict(data['model'])
+            if args.pretrained:
+                model.load_state_dict(data['model'])
         else:
-            model.load_state_dict(data)
+            if args.pretrained:
+                model.load_state_dict(data)
             if cfg.DATA.NUMBER_COARSE:
                 model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
     else:
-        model = ViT(cfg)
+        model = ViT(cfg, load_pretrain=args.pretrained)
 
     if args.train:
         optimizer = make_optimizer([model], cfg.SOLVER)
@@ -149,6 +147,9 @@ if __name__ == "__main__":
     parser.add_argument('--k', type=int, default=5, help='number k')
     parser.add_argument('--alpha', type=int, default=-1, help='number candidates')
     parser.add_argument('--words', type=str, default='/path/to/words', help='words file path')
+    parser.add_argument('--config', type=str, default='/path/to/config-file', help='config file path')
+    parser.add_argument('--tree', type=str, default='/path/to/tot-tree-file', help='tot tree file path')
+    parser.add_argument('--pretrained', action= "store_true", help = "")
     parser.add_argument('--train', action= "store_true", help = "")
     parser.add_argument('--test', action= "store_true", help = "")
     parser.add_argument('--naive', action= "store_true", help = "")

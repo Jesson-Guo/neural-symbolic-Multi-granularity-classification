@@ -14,12 +14,21 @@ from utils.util import AverageMeter, accuracy, reduce_mean
 from eval import eval
 
 
-def compute_penalty(x, targets, criterion, tot):
-    penalty = 0.
+def compute_scores(x, tot):
     score_dict = {}
     # TODO 检查一下tot.thought_cache全不全
     for k, caches in tot.thought_cache.items():
         score_dict[k] = {}
+        for j, cache in caches.items():
+            scores = x[:, cache["tids"]]
+            score_dict[k][j] = scores.softmax(dim=1)
+            # score_dict[k][j] = (indices, torch.LongTensor(coarse_targets).to(targets.device), scores, cache)
+    return score_dict
+
+
+def compute_penalty(outputs, targets, criterion, num_classes, tot):
+    penalty = 0.
+    for k, caches in tot.thought_cache.items():
         for j, cache in caches.items():
             coarse_targets = []
             indices = []
@@ -28,34 +37,32 @@ def compute_penalty(x, targets, criterion, tot):
                     coarse_targets.append(cache["coarse_targets"][targets[i].item()])
                     indices.append(i)
 
+            # 仅对每一层计算loss，不考虑路径概率
+            # TODO 在外层计算loss，考虑路径概率
             if len(indices):
-                coarse_x = x[indices, :]
-                coarse_x = coarse_x[:, cache["tids"]]
-                coarse_out = coarse_x.softmax(dim=1)
+                coarse_outputs = outputs[indices, :]
+                coarse_outputs = coarse_outputs[:, cache["tids"]]
                 coarse_targets = torch.LongTensor(coarse_targets).to(targets.device)
                 if cache["do_loss"]:
-                    penalty += criterion(coarse_out, coarse_targets, num_classes=len(cache["tids"]))
+                    penalty += criterion(coarse_outputs, coarse_targets, num_classes=len(cache["tids"]), norm=True)
                     if torch.isnan(penalty).any():
                         print("Nan error occurs, please check the values computing loss")
                         exit(0)
-            out = x[:, cache["tids"]].softmax(dim=1)
-            score_dict[k][j] = out
-    return penalty, score_dict
+    penalty += criterion(outputs[:, :num_classes], targets, norm=True)
+    return outputs[:, :num_classes], penalty
 
 
 def train_one_batch(x, targets, criterion, tot, num_classes, device):
-    penalty, score_dict = compute_penalty(x, targets, criterion, tot)
+    score_dict = compute_scores(x, tot)
 
-    outputs = torch.zeros([x.shape[0], num_classes], dtype=torch.float32).to(device)
+    outputs = torch.zeros([x.shape[0], tot.num_coarses], dtype=torch.float32).to(device)
     tot.root.score = torch.FloatTensor([1]).to(device)
     tot.root.path_score = torch.FloatTensor([1]).to(device)
 
     thoughts = [tot.root]
+
     while len(thoughts):
         t = thoughts.pop()
-        if t.stop():
-            label_id = t.tid
-            outputs[:, label_id] += t.path_score
 
         label_list = list(t.labels.keys())
         label_list.sort()
@@ -65,8 +72,10 @@ def train_one_batch(x, targets, criterion, tot, num_classes, device):
                 for j in range(len(ts)):
                     score = score_dict[label_str][i][:, j]
                     ts[j].path_score = score * t.path_score
+                    outputs[:, ts[j].tid] += ts[j].path_score
                     thoughts.append(ts[j])
 
+    outputs, penalty = compute_penalty(outputs, targets, criterion, num_classes, tot)
     return outputs, penalty
 
 
@@ -103,7 +112,7 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
                 x, corase_x = model(x, return_feature=True)
                 x = torch.cat([x, corase_x], dim=1)
                 outputs, loss = train_one_batch(x, targets, criterion, tot, num_classes, device)
-                loss += criterion(outputs, targets, norm=True)
+                # loss += criterion(outputs, targets, norm=True)
             else:
                 outputs = model(x)
                 loss = criterion(outputs, targets)
