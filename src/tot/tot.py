@@ -71,7 +71,7 @@ class ToT:
         self.root.score = 1
         self.root.path_score = 1
 
-    def reset(self):
+    def reset(self, samples_per_cls):
         temp = {}
         num_classes = self.num_coarses
         for k in self.plan_dict.keys():
@@ -103,12 +103,24 @@ class ToT:
             self.thought_dict[t.tid] = t
 
         del temp
+        N = sum(samples_per_cls)
+        self.data_caches = {-1: {"N": N, "beta": (N-1) / N}}
+        for i, t in self.thought_dict.items():
+            subset_list = list(t.labels.keys())
+            subset_num_sample_list = [samples_per_cls[int(s)] for s in subset_list]
+            N = sum(subset_num_sample_list)
+            beta = (N-1) / N
+            self.data_caches[i] = {"N": N, "beta": beta}
+
         for k, plans in self.plan_dict.items():
             self.thought_cache[k] = {}
             for i, ts in plans.items():
                 if ts[0].is_valid():
-                    self.thought_cache[k][i] = {"tids": [], "coarse_targets": {}, "do_loss": False}
+                    self.thought_cache[k][i] = {"tids": [], "effective_num": [], "coarse_targets": {}, "do_loss": False}
+                    beta = self.data_caches[ts[0].parent.tid]["beta"]
                     for j in range(len(ts)):
+                        Ny = self.data_caches[ts[j].tid]["N"]
+                        self.thought_cache[k][i]["effective_num"].append((1-beta**Ny) / (1-beta))
                         self.thought_cache[k][i]["tids"].append(ts[j].tid)
                         for l in ts[j].labels.keys():
                             self.thought_cache[k][i]["coarse_targets"][l] = j

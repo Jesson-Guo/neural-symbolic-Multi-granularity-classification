@@ -16,7 +16,7 @@ from src.tot.tot import ToT
 from src.tot.builder import ToTBuilder
 from src.vpt.models.vit_models import ViT
 from src.vpt.configs.config import get_cfg
-from src.solver.loss import PsychoCrossEntropy
+from src.solver.loss import PsychoCrossEntropy, PsychoClassBalancedCrossEntropy
 from src.solver.lr_scheduler import make_scheduler
 from src.solver.optimizer import make_optimizer
 from utils.conf import is_main_process
@@ -43,14 +43,12 @@ def main(args):
     cfg.DATA.NUMBER_COARSE = 0
     cfg.WORKERS = args.workers
     cfg.K = args.k
-    if cfg.NUM_GPUS > 1:
-        cfg.OUTPUT_DIR = os.path.join(cfg.OUTPUT_DIR, "dist")
     if args.test or args.resume:
         cfg.MODEL.MODEL_ROOT = "./output/dist"
         cfg.MODEL.MODEL_NAME = f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}.pth"
 
     # device = torch.device("cpu")
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda")
     if args.local_rank != -1:
         torch.cuda.set_device(args.local_rank)
         device = torch.device("cuda", args.local_rank)
@@ -69,7 +67,7 @@ def main(args):
         builder = ToTBuilder(plan_func, num_plans=2, num_coarse=10000, num_k=5)
         root, plan_dict = builder.load(labels, args.tree)
         tot = ToT(cfg.DATA.NUMBER_CLASSES, sim_func, plan_dict, root)
-        tot.reset()
+        tot.reset(train_loader.dataset.img_num_list)
 
         # 这里可以考虑一下是否固定叶子的weight，直接用预训练的参数还是重新训练
         # 不固定，重新训练
@@ -87,7 +85,7 @@ def main(args):
                 model.load_state_dict(data['model'])
         else:
             if args.pretrained:
-                model.load_state_dict(data)
+                model.load_state_dict(data['model'])
             if cfg.DATA.NUMBER_COARSE:
                 model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
     else:
@@ -97,14 +95,15 @@ def main(args):
         optimizer = make_optimizer([model], cfg.SOLVER)
         scheduler = make_scheduler(optimizer, cfg.SOLVER)
 
-    # if args.resume:
-    #     cfg.start_epoch = data["epoch"]
-    #     optimizer.load_state_dict(data["optimizer"])
-    #     scheduler.load_state_dict(data["scheduler"])
+    if args.resume:
+        cfg.start_epoch = data["epoch"]
+        optimizer.load_state_dict(data["optimizer"])
+        scheduler.load_state_dict(data["scheduler"])
 
     model = model.to(device)
 
-    criterion = PsychoCrossEntropy(cfg.DATA.NUMBER_CLASSES)
+    criterion = PsychoClassBalancedCrossEntropy(cfg.DATA.NUMBER_CLASSES, train_loader.dataset.img_num_list)
+    # criterion = PsychoCrossEntropy(cfg.DATA.NUMBER_CLASSES)
 
     if cfg.NUM_GPUS > 1:
         model = nn.parallel.DistributedDataParallel(

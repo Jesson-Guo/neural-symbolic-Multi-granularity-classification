@@ -9,6 +9,24 @@ from torch.utils.data.distributed import DistributedSampler
 from utils.conf import get_world_size
 
 
+class CIFAR10(torchvision.datasets.CIFAR10):
+    cls_num = 10
+
+    def __init__(self, root, train=True, transform=None, target_transform=None, download=False):
+        super(CIFAR10, self).__init__(root, train, transform, target_transform, download)
+        num = len(self.data) / self.cls_num
+        self.img_num_list = [num for _ in range(self.cls_num)]
+
+
+class CIFAR100(torchvision.datasets.CIFAR100):
+    cls_num = 100
+
+    def __init__(self, root, train=True, transform=None, target_transform=None, download=False):
+        super(CIFAR100, self).__init__(root, train, transform, target_transform, download)
+        num = len(self.data) / self.cls_num
+        self.img_num_list = [num for _ in range(self.cls_num)]
+
+
 class IMBALANCECIFAR10(torchvision.datasets.CIFAR10):
     cls_num = 10
 
@@ -17,8 +35,8 @@ class IMBALANCECIFAR10(torchvision.datasets.CIFAR10):
                  download=False):
         super(IMBALANCECIFAR10, self).__init__(root, train, transform, target_transform, download)
         np.random.seed(rand_number)
-        img_num_list = self.get_img_num_per_cls(self.cls_num, imb_type, imb_factor)
-        self.gen_imbalanced_data(img_num_list)
+        self.img_num_list = self.get_img_num_per_cls(self.cls_num, imb_type, imb_factor)
+        self.gen_imbalanced_data(self.img_num_list)
 
     def get_img_num_per_cls(self, cls_num, imb_type, imb_factor):
         img_max = len(self.data) / cls_num
@@ -145,7 +163,7 @@ class _Imagenet1000Val(torchvision.datasets.ImageFolder):
 
 def create_train_dataloader(cfg):
     if cfg.DATA.NAME == "cifar10":
-        train_dataset = torchvision.datasets.CIFAR10(
+        train_dataset = CIFAR10(
             root=cfg.DATA.ROOT,
             train=True,
             transform=transforms.Compose([
@@ -169,7 +187,7 @@ def create_train_dataloader(cfg):
             ])
         )
     elif cfg.DATA.NAME == "cifar100":
-        train_dataset = torchvision.datasets.CIFAR100(
+        train_dataset = CIFAR100(
             root=cfg.DATA.ROOT,
             train=True,
             transform=transforms.Compose([
@@ -181,7 +199,7 @@ def create_train_dataloader(cfg):
             ])
         )
     elif cfg.DATA.NAME == "cifar100-lt":
-        train_dataset = IMBALANCECIFAR10(
+        train_dataset = IMBALANCECIFAR100(
             root=cfg.DATA.ROOT,
             train=True,
             transform=transforms.Compose([
