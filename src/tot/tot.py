@@ -129,7 +129,7 @@ class ToT:
 
     def dfs(self, idx, x, alpha):
         dq = deque()
-        result = Result(self.root.name, STATUS[self.root.feedback], 0)
+        result = Result(self.root.name, STATUS[self.root.feedback], 1)
         dq.append((self.root, result))
         pred = -1
         # candidates 可以设置一个阈值
@@ -137,14 +137,13 @@ class ToT:
         while len(dq):
             t, r = dq.pop()
             if t.stop():
-                score = x[idx, t.tid]
-                r_c = Result(t.name, STATUS[t.feedback], score, r)
-                r.add(r_c)
-                candidates["score"].append(score)
+                candidates["score"].append(r.score)
                 candidates["tids"].append(t.tid)
                 if len(candidates["score"]) == alpha:
                     break
                 continue
+            # if r.score < 0.5:
+            #     continue
 
             label_list = list(t.labels.keys())
             label_list.sort()
@@ -155,12 +154,13 @@ class ToT:
                 scores = x[idx, tids].unsqueeze(0)
                 out = scores.softmax(dim=1)
                 pred = out.data.max(1)[1].item()
+                score = out[0, pred].data.item() * r.score
                 tt = self.thought_dict[tids[pred]]
-                res = Result(tt.name, STATUS[tt.feedback], scores[0, pred].data.item(), r)
+                res = Result(tt.name, STATUS[tt.feedback], score, r)
                 r.add(res)
                 dq.append((tt, res))
 
-        a = torch.stack(candidates["score"]).argmax()
+        a = torch.FloatTensor(candidates["score"]).argmax()
         pred = candidates["tids"][a]
         return pred, result
 

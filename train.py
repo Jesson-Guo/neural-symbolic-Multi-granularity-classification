@@ -84,16 +84,15 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
     losses = AverageMeter()
     batch_time = AverageMeter()
 
-    beta = (len(train_loader.dataset.data)-1) / len(train_loader.dataset.data)
-    a = train_loader.dataset.img_num_list
     data_len = len(train_loader.dataset)
+    classes = train_loader.dataset.classes
+    img_num_list = train_loader.dataset.img_num_list
+
     save_file = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}.pth")
     save_best = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}_best.pth")
 
-    # if cfg.METHOD == "vit":
-    #     criterion = nn.CrossEntropyLoss()
-
     for epoch in range(cfg.start_epoch, total_epoch):
+        wrong_acc = torch.zeros(num_classes).to(device)
         coarse_acc = None
         train_acc = torch.zeros(2).to(device)
         best_acc = 0
@@ -114,7 +113,6 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
                 x = torch.cat([x, corase_x], dim=1)
                 outputs, loss, acc = train_one_batch(x, targets, criterion, tot, num_classes, device)
                 loss += criterion(outputs, targets, norm=True)
-                # loss = loss * data_len
 
                 if coarse_acc == None:
                     coarse_acc = acc
@@ -127,11 +125,16 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
                 outputs = model(x)
                 outputs = outputs.softmax(dim=1)
                 loss = criterion(outputs, targets)
-                # loss = loss * data_len
 
             train_acc1, train_acc2 = accuracy(outputs, targets, topk=(1, 5))
             train_acc[0] += train_acc1
             train_acc[1] += train_acc2
+
+            pred = outputs.max(1)[1]
+            wrong_indices = torch.nonzero(pred.data!=targets.data)
+            wrong_targets = targets[wrong_indices]
+            for i in range(num_classes):
+                wrong_acc[i] += (wrong_targets.data==i).sum()
 
             if cfg.NUM_GPUS > 1:
                 torch.distributed.barrier()
@@ -160,6 +163,7 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
                 for j in acc[k].keys():
                     coarse_acc[k][j][0] = reduce_mean(coarse_acc[k][j][0], average=False).item()
                     coarse_acc[k][j][1] = reduce_mean(coarse_acc[k][j][1], average=False).item()
+        wrong_acc = reduce_mean(wrong_acc, average=False)
 
         if is_main_process():
             if cfg.METHOD == "tot":
@@ -171,6 +175,8 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
                 print(f'\
                     train top1: {train_acc[0].item()}\t\
                     train top5: {train_acc[1].item()}')
+            for i in range(num_classes):
+                print(f"{classes[i]}: ({wrong_acc[i].item()}, {wrong_acc[i].item() / img_num_list[i]})")
 
         # eval
         eval_acc = eval(cfg, tot, model, val_loader, alpha, device)
@@ -185,9 +191,9 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
                 "scheduler": scheduler.state_dict()
             }
             if cfg.NUM_GPUS > 1:
-                state = {"model": model.module.state_dict()}
+                state["model"] = model.module.state_dict()
             else:
-                state = {"model": model.state_dict()}
+                state["model"] = model.state_dict()
 
             torch.save(state, save_file)
             if is_best:

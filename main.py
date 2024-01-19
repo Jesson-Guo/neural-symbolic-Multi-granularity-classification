@@ -44,7 +44,7 @@ def main(args):
     cfg.WORKERS = args.workers
     cfg.K = args.k
     if args.test or args.resume:
-        cfg.MODEL.MODEL_ROOT = "./output/dist"
+        cfg.MODEL.MODEL_ROOT = "./output"
         cfg.MODEL.MODEL_NAME = f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}.pth"
 
     # device = torch.device("cpu")
