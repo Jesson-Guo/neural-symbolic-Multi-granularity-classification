@@ -35,9 +35,7 @@ def compute_penalty(x, targets, criterion, tot):
                 coarse_out = coarse_x.softmax(dim=1)
                 coarse_targets = torch.LongTensor(coarse_targets).to(targets.device)
                 if cache["do_loss"]:
-                    # TODO 这里先粗略处理一下，直接用叶子标签的数量计算 Class-Balanced Softmax Cross-Entropy Loss
                     penalty += criterion(coarse_out, coarse_targets, cache["effective_num"], num_classes=len(cache["tids"]))
-                    # penalty += criterion(coarse_out, coarse_targets, num_classes=len(cache["tids"]))
                     if torch.isnan(penalty).any():
                         print("Nan error occurs, please check the values computing loss")
                         exit(0)
@@ -88,8 +86,8 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
     classes = train_loader.dataset.classes
     img_num_list = train_loader.dataset.img_num_list
 
-    save_file = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}.pth")
-    save_best = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}_best.pth")
+    save_file = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}_{cfg.loss}.pth")
+    save_best = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}_{cfg.loss}_best.pth")
 
     for epoch in range(cfg.start_epoch, total_epoch):
         wrong_acc = torch.zeros(num_classes).to(device)

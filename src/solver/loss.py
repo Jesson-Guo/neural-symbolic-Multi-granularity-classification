@@ -8,11 +8,13 @@ class PsychoCrossEntropy(nn.Module):
         super().__init__()
         self.num_classes = num_classes
 
-    def forward(self, x, y, num_classes=None, norm=False):
+    def forward(self, x, y, effective_number=None, num_classes=None, norm=False):
         if num_classes == None:
             num_classes = self.num_classes
+
         if norm:
             x = f.normalize(x, dim=1)
+
         x = torch.log(x+1e-9)
         y = f.one_hot(y, num_classes)
         loss = y * x

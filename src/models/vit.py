@@ -9,9 +9,10 @@ class TimmViT(timm.models.vision_transformer.VisionTransformer):
         super(TimmViT, self).__init__(**model_args)
         self.head_coarse = None
 
-    def freeze(self):
+    def freeze_backbone(self):
         for k, p in self.named_parameters():
-            p.requires_grad = False
+            if not k.startswith("head"):
+                p.requires_grad = False
 
     def forward(self, x, return_feature=False):
         x = self.forward_features(x)

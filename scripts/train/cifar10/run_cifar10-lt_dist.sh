@@ -12,5 +12,5 @@ python -m torch.distributed.launch --nproc_per_node=4 --master_port 29502 \
         --tree ./tots/no_other/cifar10-2.json \
         --train \
         --naive \
-        --resume \
-        --pretrained \
+        # --resume \
+        # --pretrained \

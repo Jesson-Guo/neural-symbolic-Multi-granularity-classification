@@ -71,7 +71,7 @@ class ToT:
         self.root.score = 1
         self.root.path_score = 1
 
-    def reset(self, samples_per_cls):
+    def reset(self, cfg, samples_per_cls):
         temp = {}
         num_classes = self.num_coarses
         for k in self.plan_dict.keys():
@@ -105,6 +105,8 @@ class ToT:
         del temp
         N = sum(samples_per_cls)
         self.data_caches = {-1: {"N": N, "beta": (N-1) / N}}
+        if not cfg.loss == "cbce":
+            samples_per_cls /= min(samples_per_cls)
         for i, t in self.thought_dict.items():
             subset_list = list(t.labels.keys())
             subset_num_sample_list = [samples_per_cls[int(s)] for s in subset_list]
@@ -120,7 +122,13 @@ class ToT:
                     beta = self.data_caches[ts[0].parent.tid]["beta"]
                     for j in range(len(ts)):
                         Ny = self.data_caches[ts[j].tid]["N"]
-                        self.thought_cache[k][i]["effective_num"].append((1-beta**Ny) / (1-beta))
+                        if cfg.loss == "cbce":
+                            en = (1-beta**Ny) / (1-beta)
+                        elif cfg.loss == "csce":
+                            en = Ny
+                        else:
+                            en = 1
+                        self.thought_cache[k][i]["effective_num"].append(en)
                         self.thought_cache[k][i]["tids"].append(ts[j].tid)
                         for l in ts[j].labels.keys():
                             self.thought_cache[k][i]["coarse_targets"][l] = j
@@ -137,7 +145,11 @@ class ToT:
         while len(dq):
             t, r = dq.pop()
             if t.stop():
-                candidates["score"].append(r.score)
+                # if self.judge == "path":
+                #     score = r.score
+                # elif self.judge == "score":
+                #     score = x[idx, t.tid]
+                candidates["score"].append(x[idx, t.tid])
                 candidates["tids"].append(t.tid)
                 if len(candidates["score"]) == alpha:
                     break
@@ -154,7 +166,8 @@ class ToT:
                 scores = x[idx, tids].unsqueeze(0)
                 out = scores.softmax(dim=1)
                 pred = out.data.max(1)[1].item()
-                score = out[0, pred].data.item() * r.score
+                score = out[0, pred].data.item()
+                score = score * r.score
                 tt = self.thought_dict[tids[pred]]
                 res = Result(tt.name, STATUS[tt.feedback], score, r)
                 r.add(res)
