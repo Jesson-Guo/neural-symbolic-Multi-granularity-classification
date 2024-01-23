@@ -16,7 +16,7 @@ from src.tot.tot import ToT
 from src.tot.builder import ToTBuilder
 from src.vpt.models.vit_models import ViT
 from src.vpt.configs.config import get_cfg
-from src.solver.loss import PsychoCrossEntropy, PsychoClassBalancedCrossEntropy
+from src.solver.loss import *
 from src.solver.lr_scheduler import make_scheduler
 from src.solver.optimizer import make_optimizer
 from utils.conf import is_main_process
@@ -45,7 +45,7 @@ def main(args):
     cfg.K = args.k
     if args.test or args.resume:
         cfg.MODEL.MODEL_ROOT = "./output"
-        cfg.MODEL.MODEL_NAME = f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}.pth"
+        cfg.MODEL.MODEL_NAME = f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}_{args.loss}.pth"
 
     # device = torch.device("cpu")
     device = torch.device("cuda")
@@ -54,6 +54,7 @@ def main(args):
         device = torch.device("cuda", args.local_rank)
         torch.distributed.init_process_group(backend="nccl", init_method='env://')
 
+    # val使用正常数据集，train使用长尾
     train_loader = create_train_dataloader(cfg)
     val_loader = create_val_dataloader(cfg)
     samples_per_cls = np.array(train_loader.dataset.img_num_list, dtype=np.float32)
@@ -76,8 +77,8 @@ def main(args):
         # 不固定，重新训练
         cfg.DATA.NUMBER_COARSE = tot.num_coarses - cfg.DATA.NUMBER_CLASSES
 
-    data = torch.load(os.path.join(cfg.MODEL.MODEL_ROOT, cfg.MODEL.MODEL_NAME), map_location="cpu")
     if args.naive:
+        data = torch.load(os.path.join(cfg.MODEL.MODEL_ROOT, cfg.MODEL.MODEL_NAME), map_location=f"cpu")
         model = TimmViT(cfg, load_pretrain=False)
         if args.freeze:
             model.freeze_backbone()
@@ -87,10 +88,10 @@ def main(args):
             if args.pretrained:
                 model.load_state_dict(data['model'])
         else:
+            if args.pretrained:
+                model.load_state_dict(data)
             if cfg.DATA.NUMBER_COARSE:
                 model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
-            if args.pretrained:
-                model.load_state_dict(data['model'])
     else:
         model = ViT(cfg, load_pretrain=args.pretrained)
 
@@ -99,7 +100,7 @@ def main(args):
         scheduler = make_scheduler(optimizer, cfg.SOLVER)
 
     if args.resume:
-        cfg.start_epoch = data["epoch"]
+        cfg.start_epoch = data["epoch"] + 1
         # optimizer.load_state_dict(data["optimizer"])
         # scheduler.load_state_dict(data["scheduler"])
 
@@ -107,6 +108,14 @@ def main(args):
 
     if cfg.loss == "cbce" or cfg.loss == "csce":
         criterion = PsychoClassBalancedCrossEntropy(cfg.DATA.NUMBER_CLASSES, train_loader.dataset.img_num_list)
+    elif cfg.loss == "ldam":
+        criterion = LDAMLoss(cfg.DATA.NUMBER_CLASSES, train_loader.dataset.img_num_list)
+    elif args.loss == 'la':
+        criterion = VSLoss(cfg.DATA.NUMBER_CLASSES, train_loader.dataset.img_num_list, gamma=0)
+    elif args.loss == 'cdt':
+        criterion = VSLoss(cfg.DATA.NUMBER_CLASSES, train_loader.dataset.img_num_list, tau=0)
+    elif args.loss == 'vs':
+        criterion = VSLoss(cfg.DATA.NUMBER_CLASSES, train_loader.dataset.img_num_list)
     else:
         criterion = PsychoCrossEntropy(cfg.DATA.NUMBER_CLASSES)
 

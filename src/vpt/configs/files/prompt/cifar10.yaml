@@ -2,15 +2,15 @@ _BASE_: "../base-prompt.yaml"
 NUM_GPUS: 4
 DATA:
   NAME: "cifar10"
-  ROOT: ""
+  ROOT: "/root/autodl-tmp/data"
   NUMBER_CLASSES: 10
-  MULTILABEL: False
   BATCH_SIZE: 64
   FEATURE: "sup_vitb16_imagenet21k"
 MODEL:
   TRANSFER_TYPE: "prompt"
   TYPE: "vit"
   MODEL_ROOT: "./weights"
+  MODEL_NAME: "imagenet21k_ViT-B_16.npz"
   PROMPT:
     DEEP: True
     DROPOUT: 0.1

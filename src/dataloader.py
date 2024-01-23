@@ -253,7 +253,7 @@ def create_train_dataloader(cfg):
 
 def create_val_dataloader(cfg):
     if cfg.DATA.NAME == "cifar10":
-        val_dataset = torchvision.datasets.CIFAR10(
+        val_dataset = CIFAR10(
             root=cfg.DATA.ROOT,
             train=False,
             transform=transforms.Compose([
@@ -273,7 +273,7 @@ def create_val_dataloader(cfg):
             ])
         )
     elif cfg.DATA.NAME == "cifar100":
-        val_dataset = torchvision.datasets.CIFAR100(
+        val_dataset = CIFAR100(
             root=cfg.DATA.ROOT,
             train=False,
             transform=transforms.Compose([

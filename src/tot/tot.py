@@ -57,6 +57,8 @@ class ToT:
 
         self.thought_dict = {}
         self.thought_cache = {}
+        self.name_cache = {}
+        self.leaves_cnt = np.zeros((num_classes))
 
     def clean(self):
         thoughts = [self.root]
@@ -87,6 +89,7 @@ class ToT:
             if t.stop():
                 t.tid = list(t.labels.keys())[0]
                 self.thought_dict[t.tid] = t
+                self.leaves_cnt[t.tid] += 1
                 continue
 
             for _ in t.plans.values():
@@ -103,37 +106,34 @@ class ToT:
             self.thought_dict[t.tid] = t
 
         del temp
-        N = sum(samples_per_cls)
-        self.data_caches = {-1: {"N": N, "beta": (N-1) / N}}
-        if not cfg.loss == "cbce":
-            samples_per_cls /= min(samples_per_cls)
+        self.data_caches = {-1: sum(samples_per_cls)}
         for i, t in self.thought_dict.items():
             subset_list = list(t.labels.keys())
             subset_num_sample_list = [samples_per_cls[int(s)] for s in subset_list]
-            N = sum(subset_num_sample_list)
-            beta = (N-1) / N
-            self.data_caches[i] = {"N": N, "beta": beta}
+            self.data_caches[i] = sum(subset_num_sample_list)
 
         for k, plans in self.plan_dict.items():
             self.thought_cache[k] = {}
             for i, ts in plans.items():
                 if ts[0].is_valid():
-                    self.thought_cache[k][i] = {"tids": [], "effective_num": [], "coarse_targets": {}, "do_loss": False}
-                    beta = self.data_caches[ts[0].parent.tid]["beta"]
+                    self.thought_cache[k][i] = {"tids": [], "samples_per_cls": [], "coarse_targets": {}, "do_loss": False}
                     for j in range(len(ts)):
-                        Ny = self.data_caches[ts[j].tid]["N"]
-                        if cfg.loss == "cbce":
-                            en = (1-beta**Ny) / (1-beta)
-                        elif cfg.loss == "csce":
-                            en = Ny
-                        else:
-                            en = 1
-                        self.thought_cache[k][i]["effective_num"].append(en)
+                        self.thought_cache[k][i]["samples_per_cls"].append(self.data_caches[ts[j].tid])
                         self.thought_cache[k][i]["tids"].append(ts[j].tid)
                         for l in ts[j].labels.keys():
                             self.thought_cache[k][i]["coarse_targets"][l] = j
                         if not self.thought_cache[k][i]["do_loss"] and not ts[j].stop():
                             self.thought_cache[k][i]["do_loss"] = True
+
+        for k in self.plan_dict.keys():
+            self.name_cache[k] = {}
+            for j, ts in self.plan_dict[k].items():
+                name = ts[0].parent.name
+                self.name_cache[k][j] = []
+                for t in ts:
+                    self.name_cache[k][j].append(t.name)
+            self.name_cache[name] = self.name_cache[k]
+            del self.name_cache[k]
 
     def dfs(self, idx, x, alpha):
         dq = deque()

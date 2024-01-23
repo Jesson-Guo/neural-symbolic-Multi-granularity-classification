@@ -65,7 +65,7 @@ class ViT(nn.Module):
         if load_pretrain:
             weights = np.load(os.path.join(cfg.MODEL.MODEL_ROOT, cfg.MODEL.MODEL_NAME))
             self.enc.load_from(weights)
-            self.head.weight.copy_(torch.from_numpy(weights["head/kernel"]).T)
+            # self.head.weight.copy_(torch.from_numpy(weights["head/kernel"]).T)
 
     def forward(self, x, return_feature=False):
         if self.froze_enc and self.enc.training:
