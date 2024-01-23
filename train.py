@@ -56,7 +56,7 @@ def compute_penalty(x, targets, criterion, tot):
                 coarse_acc[k][j] = compute_wrong_acc(coarse_out, coarse_targets, len(cache["tids"]))
                 # coarse_acc[k][j] = [coarse_pred.eq(coarse_targets.data).sum(), torch.LongTensor([len(indices)]).to(targets.device).sum()]
             else:
-                coarse_acc[k][j] = torch.zeros(len(cache["tids"])).to(coarse_out.device)
+                coarse_acc[k][j] = torch.zeros(len(cache["tids"])).to(x.device)
                 # coarse_acc[k][j] = [torch.LongTensor([0]).to(targets.device).sum(), torch.LongTensor([0]).to(targets.device).sum()]
             out = x[:, cache["tids"]].softmax(dim=1)
             score_dict[k][j] = out
@@ -186,7 +186,8 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
                 name = tot.plan_dict[k][0][0].parent.name
                 coarse_acc_t[name] = {}
                 for j in coarse_acc[k].keys():
-                    coarse_acc_t[name][str(tot.name_cache[name][j])] = list(coarse_acc[k][j].cpu().detach().numpy())
+                    coarse_acc_t[name][str(tot.name_cache[k][j])] = list(coarse_acc[k][j].cpu().detach().numpy())
+
         wrong_acc = reduce_mean(wrong_acc, average=False)
 
         if is_main_process():

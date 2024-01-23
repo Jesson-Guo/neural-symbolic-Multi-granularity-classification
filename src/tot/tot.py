@@ -128,12 +128,9 @@ class ToT:
         for k in self.plan_dict.keys():
             self.name_cache[k] = {}
             for j, ts in self.plan_dict[k].items():
-                name = ts[0].parent.name
                 self.name_cache[k][j] = []
                 for t in ts:
                     self.name_cache[k][j].append(t.name)
-            self.name_cache[name] = self.name_cache[k]
-            del self.name_cache[k]
 
     def dfs(self, idx, x, alpha):
         dq = deque()

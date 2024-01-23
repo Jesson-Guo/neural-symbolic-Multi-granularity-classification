@@ -61,6 +61,7 @@ def main(args):
 
     cfg.loss = args.loss
 
+    # TODO 定义树的深度，太深了不太行
     tot = None
 
     if cfg.METHOD == "tot":
