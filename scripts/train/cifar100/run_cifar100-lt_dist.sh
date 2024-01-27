@@ -1,7 +1,7 @@
 #!/bin/bash
-python -m torch.distributed.launch --nproc_per_node=2 --master_port 29503 \
+python -m torch.distributed.launch --nproc_per_node=4 --master_port 29503 \
         main.py \
-        --devices 0,1 \
+        --devices 0,1,2,3 \
         --epochs 300 \
         --lr 0.0005 \
         --method tot \
@@ -13,3 +13,4 @@ python -m torch.distributed.launch --nproc_per_node=2 --master_port 29503 \
         --loss ldam \
         --train \
         --naive \
+        --pretrained \

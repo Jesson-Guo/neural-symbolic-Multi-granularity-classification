@@ -138,7 +138,8 @@ class ToT:
         dq.append((self.root, result))
         pred = -1
         # candidates 可以设置一个阈值
-        candidates = {"score": [], "tids": []}
+        # candidates = {"score": [], "tids": []}
+        candidates = {"score": {}, "tids": {}}
         while len(dq):
             t, r = dq.pop()
             if t.stop():
@@ -146,8 +147,14 @@ class ToT:
                 #     score = r.score
                 # elif self.judge == "score":
                 #     score = x[idx, t.tid]
-                candidates["score"].append(x[idx, t.tid])
-                candidates["tids"].append(t.tid)
+                # candidates["score"].append(x[idx, t.tid])
+                # candidates["tids"].append(t.tid)
+                if t.tid not in candidates:
+                    candidates["score"][t.tid] = r.score
+                    candidates["tids"][t.tid] = 1
+                else:
+                    candidates["score"][t.tid] += r.score
+                    candidates["tids"][t.tid] += 1
                 if len(candidates["score"]) == alpha:
                     break
                 continue
@@ -163,15 +170,25 @@ class ToT:
                 scores = x[idx, tids].unsqueeze(0)
                 out = scores.softmax(dim=1)
                 pred = out.data.max(1)[1].item()
-                score = out[0, pred].data.item()
-                score = score * r.score
+                # score = out[0, pred].data.item()
+                # score = score * r.score
+                if t.tid == -1:
+                    score = scores[0, pred]
+                else:
+                    score = (scores[0, pred] + r.score) / 2
                 tt = self.thought_dict[tids[pred]]
                 res = Result(tt.name, STATUS[tt.feedback], score, r)
                 r.add(res)
                 dq.append((tt, res))
 
-        a = torch.FloatTensor(candidates["score"]).argmax()
-        pred = candidates["tids"][a]
+        candidates_scores, candidates_tids = [], []
+        for k in candidates["score"].keys():
+            candidates_scores.append(candidates["score"][k] / candidates["tids"][k])
+            candidates_tids.append(k)
+        a = torch.FloatTensor(candidates_scores).argmax()
+        pred = candidates_tids[a]
+        # a = torch.FloatTensor(candidates["score"]).argmax()
+        # pred = candidates["tids"][a]
         return pred, result
 
 

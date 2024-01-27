@@ -50,15 +50,15 @@ class PsychoClassBalancedCrossEntropy(nn.Module):
         weights = 1 / effective_number
         weights = weights / torch.sum(weights) * num_classes
 
-        return F.cross_entropy(x, y, weight=weights)
-        # weights = weights.unsqueeze(0)
-        # weights = weights.repeat(y.shape[0], 1) * y
-        # weights = weights.sum(1)
-        # weights = weights.unsqueeze(1)
-        # weights = weights.repeat(1, num_classes)
+        # return F.cross_entropy(x, y, weight=weights)
+        weights = weights.unsqueeze(0)
+        weights = weights.repeat(y.shape[0], 1) * y
+        weights = weights.sum(1)
+        weights = weights.unsqueeze(1)
+        weights = weights.repeat(1, num_classes)
 
-        # loss = F.binary_cross_entropy(x, y, weight=weights)
-        # return loss
+        loss = F.binary_cross_entropy(x, y, weight=weights)
+        return loss
 
 
 class VSLoss(nn.Module):
@@ -142,4 +142,4 @@ class LDAMLoss(nn.Module):
 
         output = torch.where(index, x_m, x)
 
-        return F.cross_entropy(self.s*output, y, weight=weights)
+        return F.cross_entropy(output, y, weight=weights)

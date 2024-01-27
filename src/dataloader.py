@@ -1,4 +1,5 @@
 import os
+import random
 import numpy as np
 
 import torch
@@ -52,6 +53,7 @@ class IMBALANCECIFAR10(torchvision.datasets.CIFAR10):
                 img_num_per_cls.append(int(img_max * imb_factor))
         else:
             img_num_per_cls.extend([int(img_max)] * cls_num)
+        # random.shuffle(img_num_per_cls)
         return img_num_per_cls
 
     def gen_imbalanced_data(self, img_num_per_cls):
@@ -263,7 +265,7 @@ def create_val_dataloader(cfg):
             ])
         )
     elif cfg.DATA.NAME == "cifar10-lt":
-        val_dataset = IMBALANCECIFAR10(
+        val_dataset = CIFAR10(
             root=cfg.DATA.ROOT,
             train=False,
             transform=transforms.Compose([
@@ -283,7 +285,7 @@ def create_val_dataloader(cfg):
             ])
         )
     elif cfg.DATA.NAME == "cifar100-lt":
-        val_dataset = IMBALANCECIFAR100(
+        val_dataset = CIFAR100(
             root=cfg.DATA.ROOT,
             train=False,
             transform=transforms.Compose([

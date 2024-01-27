@@ -76,8 +76,9 @@ def train_one_batch(x, targets, criterion, tot, num_classes, device):
         t = thoughts.pop()
         if t.stop():
             label_id = t.tid
-            scores[:, label_id] += x[:, label_id]
-            outputs[:, label_id] += t.path_score
+            scores[:, label_id] += t.score
+            # scores[:, label_id] += x[:, label_id]
+            # outputs[:, label_id] += t.path_score
 
         label_list = list(t.labels.keys())
         label_list.sort()
@@ -89,9 +90,14 @@ def train_one_batch(x, targets, criterion, tot, num_classes, device):
                     ts[j].path_score = score * t.path_score
                     thoughts.append(ts[j])
 
+                    if t.tid == -1:
+                        ts[j].score = x[:, ts[j].tid]
+                    else:
+                        ts[j].score = (x[:, ts[j].tid] + t.score) / 2
+
     leaves_cnt = torch.FloatTensor(tot.leaves_cnt).to(device)
     scores = scores / leaves_cnt
-    outputs = outputs / leaves_cnt
+    # outputs = outputs / leaves_cnt
 
     return scores, penalty, coarse_acc
 
@@ -109,6 +115,11 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
 
     save_file = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}_{cfg.loss}.pth")
     save_best = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}_{cfg.loss}_best.pth")
+
+    if not cfg.DATA.NAME.endswith("lt"):
+        leaf_criterion = nn.CrossEntropyLoss()
+    else:
+        leaf_criterion = criterion
 
     for epoch in range(cfg.start_epoch, total_epoch):
         wrong_acc = torch.zeros(num_classes).to(device)
@@ -131,7 +142,7 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
                 x, corase_x = model(x, return_feature=True)
                 x = torch.cat([x, corase_x], dim=1)
                 outputs, loss, acc = train_one_batch(x, targets, criterion, tot, num_classes, device)
-                loss += criterion(outputs, targets)
+                loss += leaf_criterion(outputs, targets)
                 outputs = outputs.softmax(dim=1)
                 # loss += criterion(outputs, targets, norm=True)
 
@@ -143,7 +154,7 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
                             coarse_acc[k][j] += acc[k][j]
             else:
                 outputs = model(x)
-                loss = criterion(outputs, targets)
+                loss = leaf_criterion(outputs, targets)
                 outputs = outputs.softmax(dim=1)
 
             train_acc1, train_acc2 = accuracy(outputs, targets, topk=(1, 5))

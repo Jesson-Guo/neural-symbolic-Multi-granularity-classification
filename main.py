@@ -89,8 +89,10 @@ def main(args):
             if args.pretrained:
                 model.load_state_dict(data['model'])
         else:
+            model.head = nn.Linear(model.head.in_features, 21843)
             if args.pretrained:
                 model.load_state_dict(data)
+            model.head = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_CLASSES)
             if cfg.DATA.NUMBER_COARSE:
                 model.head_coarse = nn.Linear(model.head.in_features, cfg.DATA.NUMBER_COARSE)
     else:
