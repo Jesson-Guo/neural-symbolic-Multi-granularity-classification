@@ -9,7 +9,8 @@ MODEL:
   TRANSFER_TYPE: "linear"
   TYPE: "vit"
   MODEL_ROOT: "./weights"
-  MODEL_NAME: "vit_base_patch16_224_in21k_ft_cifar100.pth"
+  MODEL_NAME: "vit_base_patch16_224_augreg_in21k.pth"
+  # MODEL_NAME: "vit_base_patch16_224_in21k_ft_cifar100.pth"
 SOLVER:
   BASE_LR: 0.05
   WEIGHT_DECAY: 0.01

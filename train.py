@@ -14,22 +14,34 @@ from eval import eval
 
 def compute_wrong_acc(outputs, targets, num_classes):
     wrong_acc = torch.zeros(num_classes).to(outputs.device)
+    wrong_info = {}
+
     pred = outputs.data.max(1)[1]
+
+    # for i in range(pred.shape[0]):
+    #     wrong_info[targets[i].item()] = {}
+    #     if pred[i] != targets[i]:
+    #         wrong_acc[targets[i].item()] += 1
+    #         if not pred[i].item() in wrong_info[targets[i].item()]:
+    #             wrong_info[targets[i].item()][pred[i].item()] = torch.zeros([1]).to(pred.device)
+    #         else:
+    #             wrong_info[targets[i].item()][pred[i].item()] += 1
     wrong_indices = torch.nonzero(pred.data!=targets.data)
     wrong_targets = targets[wrong_indices]
     for i in range(num_classes):
         wrong_acc[i] += (wrong_targets.data==i).sum()
-    return wrong_acc
+    return wrong_acc, wrong_info
 
 
 def compute_penalty(x, targets, criterion, tot):
     penalty = 0.
     score_dict = {}
     coarse_acc = {}
-    # TODO 检查一下tot.thought_cache全不全
+    wrong_info = {}
     for k, caches in tot.thought_cache.items():
         score_dict[k] = {}
         coarse_acc[k] = {}
+        wrong_info[k] = {}
         for j, cache in caches.items():
             coarse_targets = []
             indices = []
@@ -37,7 +49,7 @@ def compute_penalty(x, targets, criterion, tot):
                 if targets[i].item() in cache["coarse_targets"]:
                     coarse_targets.append(cache["coarse_targets"][targets[i].item()])
                     indices.append(i)
-            
+
             # coarse_acc[k][j] = {}
             # for i in cache["tids"]:
             #     coarse_acc[k][j][i] = [torch.LongTensor([0]).to(targets.device).sum(), torch.LongTensor([0]).to(targets.device).sum()]
@@ -53,18 +65,18 @@ def compute_penalty(x, targets, criterion, tot):
                         print("Nan error occurs, please check the values computing loss")
                         exit(0)
                 # coarse_pred = coarse_out.data.max(1)[1]
-                coarse_acc[k][j] = compute_wrong_acc(coarse_out, coarse_targets, len(cache["tids"]))
+                coarse_acc[k][j], _ = compute_wrong_acc(coarse_out, coarse_targets, len(cache["tids"]))
                 # coarse_acc[k][j] = [coarse_pred.eq(coarse_targets.data).sum(), torch.LongTensor([len(indices)]).to(targets.device).sum()]
             else:
                 coarse_acc[k][j] = torch.zeros(len(cache["tids"])).to(x.device)
                 # coarse_acc[k][j] = [torch.LongTensor([0]).to(targets.device).sum(), torch.LongTensor([0]).to(targets.device).sum()]
             out = x[:, cache["tids"]].softmax(dim=1)
             score_dict[k][j] = out
-    return penalty, score_dict, coarse_acc
+    return penalty, score_dict, coarse_acc, wrong_info
 
 
 def train_one_batch(x, targets, criterion, tot, num_classes, device):
-    penalty, score_dict, coarse_acc = compute_penalty(x, targets, criterion, tot)
+    penalty, score_dict, coarse_acc, wrong_info = compute_penalty(x, targets, criterion, tot)
 
     scores = torch.zeros([x.shape[0], num_classes], dtype=torch.float32).to(device)
     outputs = torch.zeros([x.shape[0], num_classes], dtype=torch.float32).to(device)
@@ -78,7 +90,7 @@ def train_one_batch(x, targets, criterion, tot, num_classes, device):
             label_id = t.tid
             scores[:, label_id] += t.score
             # scores[:, label_id] += x[:, label_id]
-            # outputs[:, label_id] += t.path_score
+            outputs[:, label_id] += t.path_score
 
         label_list = list(t.labels.keys())
         label_list.sort()
@@ -99,7 +111,7 @@ def train_one_batch(x, targets, criterion, tot, num_classes, device):
     scores = scores / leaves_cnt
     # outputs = outputs / leaves_cnt
 
-    return scores, penalty, coarse_acc
+    return scores, penalty, coarse_acc, wrong_info
 
 
 def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_loader, num_classes, total_epoch, alpha, device):
@@ -124,14 +136,17 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
     for epoch in range(cfg.start_epoch, total_epoch):
         wrong_acc = torch.zeros(num_classes).to(device)
         coarse_acc = None
+        wrong_info = {}
         train_acc = torch.zeros(2).to(device)
         best_acc = 0
         losses.reset()
         batch_time.reset()
-
         end = time.time()
+
         if is_main_process():
             train_loader = tqdm.tqdm(train_loader)
+        for i in range(num_classes):
+            wrong_info[i] = torch.zeros([num_classes]).to(device)
 
         for idx, (x, targets) in enumerate(train_loader):
             x = x.to(device)
@@ -141,7 +156,7 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
                 tot.clean()
                 x, corase_x = model(x, return_feature=True)
                 x = torch.cat([x, corase_x], dim=1)
-                outputs, loss, acc = train_one_batch(x, targets, criterion, tot, num_classes, device)
+                outputs, loss, acc, _ = train_one_batch(x, targets, criterion, tot, num_classes, device)
                 loss += leaf_criterion(outputs, targets)
                 outputs = outputs.softmax(dim=1)
                 # loss += criterion(outputs, targets, norm=True)
@@ -152,6 +167,12 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
                     for k in acc.keys():
                         for j in acc[k].keys():
                             coarse_acc[k][j] += acc[k][j]
+                # if wrong_info == None:
+                #     wrong_info = info
+                # else:
+                #     for k in info.keys():
+                #         for j in info[k].keys():
+                #             wrong_info[k][j] += acc[k][j]
             else:
                 outputs = model(x)
                 loss = leaf_criterion(outputs, targets)
@@ -161,8 +182,13 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
             train_acc[0] += train_acc1
             train_acc[1] += train_acc2
 
-            wrong_acc_t = compute_wrong_acc(outputs, targets, num_classes)
+            wrong_acc_t, _ = compute_wrong_acc(outputs, targets, num_classes)
             wrong_acc += wrong_acc_t
+
+            pred = outputs.data.max(1)[1]
+            for i in range(pred.shape[0]):
+                if pred[i] != targets[i]:
+                    wrong_info[targets[i].item()][pred[i].item()] += 1
 
             if cfg.NUM_GPUS > 1:
                 torch.distributed.barrier()
@@ -201,6 +227,9 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
 
         wrong_acc = reduce_mean(wrong_acc, average=False)
 
+        for i in range(num_classes):
+            wrong_info[i] = reduce_mean(wrong_info[i], average=False)
+
         if is_main_process():
             if cfg.METHOD == "tot":
                 print(f'\
@@ -213,6 +242,10 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
                     train top5: {train_acc[1].item()}')
             for i in range(num_classes):
                 print(f"{classes[i]}: ({wrong_acc[i].item()}, {wrong_acc[i].item() / img_num_list[i]})")
+            print("--------------")
+            for i in range(num_classes):
+                w_v, w_i = wrong_info[i].topk(2)
+                print(f"{classes[i]}: {classes[w_i[0].item()]}: {w_v[0].item()} times, {classes[w_i[1].item()]}: {w_v[1].item()} times")
 
         # eval
         eval_acc = eval(cfg, tot, model, val_loader, num_classes, alpha, device)

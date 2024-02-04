@@ -9,7 +9,7 @@ class PsychoCrossEntropy(nn.Module):
         super().__init__()
         self.num_classes = num_classes
 
-    def forward(self, x, y, beta, samples_per_cls=None, num_classes=None, norm=False, with_logits=False):
+    def forward(self, x, y, samples_per_cls=None, num_classes=None, norm=False, with_logits=False):
         if num_classes == None:
             num_classes = self.num_classes
 
@@ -21,7 +21,7 @@ class PsychoCrossEntropy(nn.Module):
         # loss = y * x
         # loss = torch.sum(loss, dim=1)
         # loss = -torch.mean(loss, dim=0)
-        loss = F.binary_cross_entropy(x, y)
+        loss = F.cross_entropy(x, y)
         return loss
 
 

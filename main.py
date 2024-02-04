@@ -120,6 +120,7 @@ def main(args):
     elif args.loss == 'vs':
         criterion = VSLoss(cfg.DATA.NUMBER_CLASSES, train_loader.dataset.img_num_list)
     else:
+        # criterion = nn.CrossEntropyLoss()
         criterion = PsychoCrossEntropy(cfg.DATA.NUMBER_CLASSES)
 
     if cfg.NUM_GPUS > 1:

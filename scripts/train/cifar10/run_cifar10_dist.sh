@@ -2,7 +2,7 @@
 python -m torch.distributed.launch --nproc_per_node=4 --master_port 29505 \
         main.py \
         --devices 0,1,2,3 \
-        --epochs 200 \
+        --epochs 100 \
         --lr 0.0005 \
         --method tot \
         --k 2 \

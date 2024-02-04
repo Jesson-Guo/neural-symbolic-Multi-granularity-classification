@@ -143,23 +143,22 @@ class ToT:
         while len(dq):
             t, r = dq.pop()
             if t.stop():
-                # if self.judge == "path":
-                #     score = r.score
-                # elif self.judge == "score":
-                #     score = x[idx, t.tid]
-                # candidates["score"].append(x[idx, t.tid])
-                # candidates["tids"].append(t.tid)
-                if t.tid not in candidates:
-                    candidates["score"][t.tid] = r.score
-                    candidates["tids"][t.tid] = 1
-                else:
-                    candidates["score"][t.tid] += r.score
-                    candidates["tids"][t.tid] += 1
-                if len(candidates["score"]) == alpha:
-                    break
+                if r.status > 0:
+                    # if self.judge == "path":
+                    #     score = r.score
+                    # elif self.judge == "score":
+                    #     score = x[idx, t.tid]
+                    # candidates["score"].append(r.score)
+                    # candidates["tids"].append(t.tid)
+                    if t.tid not in candidates:
+                        candidates["score"][t.tid] = r.score
+                        candidates["tids"][t.tid] = 1
+                    else:
+                        candidates["score"][t.tid] += r.score
+                        candidates["tids"][t.tid] += 1
+                    if len(candidates["score"]) == alpha:
+                        break
                 continue
-            # if r.score < 0.5:
-            #     continue
 
             label_list = list(t.labels.keys())
             label_list.sort()
@@ -170,6 +169,7 @@ class ToT:
                 scores = x[idx, tids].unsqueeze(0)
                 out = scores.softmax(dim=1)
                 pred = out.data.max(1)[1].item()
+                top2 = out.data.topk(2, 1, True, True)[0].squeeze()
                 # score = out[0, pred].data.item()
                 # score = score * r.score
                 if t.tid == -1:
@@ -177,10 +177,14 @@ class ToT:
                 else:
                     score = (scores[0, pred] + r.score) / 2
                 tt = self.thought_dict[tids[pred]]
-                res = Result(tt.name, STATUS[tt.feedback], score, r)
+                # status = 0 if (top2[0] - top2[1]) / top2[0] < 0.5 else tt.feedback
+                status = tt.feedback
+                res = Result(tt.name, status, score, r)
                 r.add(res)
                 dq.append((tt, res))
 
+        if len(candidates["score"]) == 0:
+            return random.randint(0, self.leaves_cnt.shape[0]-1), 1
         candidates_scores, candidates_tids = [], []
         for k in candidates["score"].keys():
             candidates_scores.append(candidates["score"][k] / candidates["tids"][k])
@@ -189,8 +193,8 @@ class ToT:
         pred = candidates_tids[a]
         # a = torch.FloatTensor(candidates["score"]).argmax()
         # pred = candidates["tids"][a]
-        return pred, result
-
+        return pred, 0
+        # return pred, result
 
     def bfs(self, idx, x, alpha):
         pass
@@ -209,9 +213,11 @@ class ToT:
         #         thoughts.append(child)
         # return name
 
-    def solve(self, x, alpha, method='dfs'):
+    def solve(self, x, targets, alpha, method='dfs'):
         method = getattr(self, method)
         pred = torch.LongTensor((x.shape[0])).to(x.device)
+        cnt = [0 for _ in range(self.leaves_cnt.shape[0])]
         for i in range(x.shape[0]):
-            pred[i], _ = method(i, x, alpha)
-        return pred
+            pred[i], c = method(i, x, alpha)
+            cnt[targets[i]] += c
+        return pred, cnt

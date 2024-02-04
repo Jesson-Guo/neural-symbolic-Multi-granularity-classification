@@ -1,7 +1,7 @@
 #!/bin/bash
 python -m torch.distributed.launch --nproc_per_node=2 --master_port 29501 \
         main.py \
-        --devices 2,3 \
+        --devices 0,1 \
         --epochs 300 \
         --lr 0.0005 \
         --method vit \
