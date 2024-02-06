@@ -6,12 +6,19 @@ from openai import OpenAI
 class GPT(object):
     completion_tokens = 0
     prompt_tokens = 0
-    prompt_sample = '''Input: {0: "airplane", 1: "bird", 2: "dog"} Answer: {"Plan1": {"FlyingObjects": [0, 1], "Pets": [2]}, "Plan2": {"Animals": [1, 2], "Vehicles": [0]}}'''
-    prompt_template = '''Giving {num_plans} plans to classify all values in set {cat_name} from Input into different sets(at least two sets) with the class name and only word id. \
+    prompt_sample = '''Input: {0: "airplane", 1: "bird", 2: "dog"}\nAnswer: {"Plan1": {"FlyingObjects": [0, 1], "LandAnimals": [2]}, "Plan2": {"Animals": [1, 2], "Vehicles": [0]}}\n'''
+    prompt_template = '''Giving {num_plans} plans to classify all values in set {cat_name} from Input into different sets with the class name and only word id. \
+    Classify according to the items' appearence and function. \
     Each value can only belong to one set. Empty set is not allowed. \
     {sample} \
     Input: {input}\
     '''
+    # prompt_sample = '''Input: {0: "lion", 1: "bear", 2: "cattle"}\nAnswer: {"Plan1": {"Carnivores": [0], "Herbivores": [2], "Omnivores": [1]}}\n'''
+    # prompt_template = '''Classify all values from Input into 3 sets(Carnivores, Herbivores and Omnivores) with the class name and only word id. \
+    # Each value can only belong to one set. Empty set is not allowed. \
+    # {sample} \
+    # Input: {input}\
+    # '''
 
     def __init__(
         self,

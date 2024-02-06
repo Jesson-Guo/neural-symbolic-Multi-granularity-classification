@@ -138,8 +138,8 @@ class ToT:
         dq.append((self.root, result))
         pred = -1
         # candidates 可以设置一个阈值
-        # candidates = {"score": [], "tids": []}
-        candidates = {"score": {}, "tids": {}}
+        candidates = {"score": [], "tids": []}
+        # candidates = {"score": {}, "tids": {}}
         while len(dq):
             t, r = dq.pop()
             if t.stop():
@@ -148,14 +148,14 @@ class ToT:
                     #     score = r.score
                     # elif self.judge == "score":
                     #     score = x[idx, t.tid]
-                    # candidates["score"].append(r.score)
-                    # candidates["tids"].append(t.tid)
-                    if t.tid not in candidates:
-                        candidates["score"][t.tid] = r.score
-                        candidates["tids"][t.tid] = 1
-                    else:
-                        candidates["score"][t.tid] += r.score
-                        candidates["tids"][t.tid] += 1
+                    candidates["score"].append(r.score)
+                    candidates["tids"].append(t.tid)
+                    # if t.tid not in candidates:
+                    #     candidates["score"][t.tid] = r.score
+                    #     candidates["tids"][t.tid] = 1
+                    # else:
+                    #     candidates["score"][t.tid] += r.score
+                    #     candidates["tids"][t.tid] += 1
                     if len(candidates["score"]) == alpha:
                         break
                 continue
@@ -169,13 +169,13 @@ class ToT:
                 scores = x[idx, tids].unsqueeze(0)
                 out = scores.softmax(dim=1)
                 pred = out.data.max(1)[1].item()
-                top2 = out.data.topk(2, 1, True, True)[0].squeeze()
-                # score = out[0, pred].data.item()
-                # score = score * r.score
-                if t.tid == -1:
-                    score = scores[0, pred]
-                else:
-                    score = (scores[0, pred] + r.score) / 2
+                # top2 = out.data.topk(2, 1, True, True)[0].squeeze()
+                score = out[0, pred].data.item()
+                score = score * r.score
+                # if t.tid == -1:
+                #     score = scores[0, pred]
+                # else:
+                #     score = (scores[0, pred] + r.score) / 2
                 tt = self.thought_dict[tids[pred]]
                 # status = 0 if (top2[0] - top2[1]) / top2[0] < 0.5 else tt.feedback
                 status = tt.feedback
@@ -185,14 +185,14 @@ class ToT:
 
         if len(candidates["score"]) == 0:
             return random.randint(0, self.leaves_cnt.shape[0]-1), 1
-        candidates_scores, candidates_tids = [], []
-        for k in candidates["score"].keys():
-            candidates_scores.append(candidates["score"][k] / candidates["tids"][k])
-            candidates_tids.append(k)
-        a = torch.FloatTensor(candidates_scores).argmax()
-        pred = candidates_tids[a]
-        # a = torch.FloatTensor(candidates["score"]).argmax()
-        # pred = candidates["tids"][a]
+        # candidates_scores, candidates_tids = [], []
+        # for k in candidates["score"].keys():
+        #     candidates_scores.append(candidates["score"][k] / candidates["tids"][k])
+        #     candidates_tids.append(k)
+        # a = torch.FloatTensor(candidates_scores).argmax()
+        # pred = candidates_tids[a]
+        a = torch.FloatTensor(candidates["score"]).argmax()
+        pred = candidates["tids"][a]
         return pred, 0
         # return pred, result
 

@@ -10,39 +10,28 @@ from src.dataloader import create_val_dataloader
 from src.node import build_tree
 from src.gpt import GPT
 from src.tot.tot import ToT
+from src.tot.builder import ToTBuilder
+from src.vpt.configs.config import get_cfg
 from utils import metrics
 
 
 def main(args):
-    model = timm.create_model("timm/vit_base_patch16_224.orig_in21k_ft_in1k", pretrained=False)
-    model.head = nn.Linear(model.head.in_features, 100)
-    model.load_state_dict(torch.load("./weights/vit_base_patch16_224_in21k_ft_cifar100.pth", map_location="cpu"))
+    cfg = get_cfg()
+    cfg.merge_from_file("./src/vpt/configs/files/simple/cifar100.yaml")
+    cfg.WORKERS = args.workers
 
-    # model = timm.create_model(
-    #     model_name=args.model,
-    #     pretrained=args.pretrained,
-    #     pretrained_cfg_overlay=dict(file=args.ckpt),
-    #     num_classes=args.classes
-    # )
+    val_loader = create_val_dataloader(cfg)
 
-    val_loader = create_val_dataloader(args)
-
-    state_dict = model.state_dict()
-    node_dict, label_to_wnid, _, labels, node_children = build_tree(args, val_loader.dataset.class_to_idx, state_dict['head.weight'])
+    node_dict, label_to_wnid, label_to_id, labels, node_children = build_tree(args, val_loader.dataset.class_to_idx)
 
     client = openai.OpenAI()
     gpt = GPT(client, model=args.backend, temperature=args.temperature)
 
     sim_func = getattr(metrics, args.sim)
     plan_func = getattr(metrics, args.plan)
-    tot = ToT(plan_func, sim_func)
-    if args.load:
-        tot.load(args.load, labels)
 
-    # tot.build_tot(labels, node_dict, label_to_wnid, node_children, node_dict['fall11'], gpt, args.save)
-    root = tot.build_on_tree(labels, node_dict['fall11'], node_children)
-    tot.root = root
-    tot.save('.base_cifar100.json')
+    builder = ToTBuilder(plan_func, num_plans=2, num_coarse=10000, num_k=3)
+    root = builder.build_on_gpt(labels, gpt, "./tots/no_other/test.json", "./tots/no_other/temp.json")
 
 
 if __name__ == "__main__":
@@ -53,7 +42,7 @@ if __name__ == "__main__":
     parser.add_argument('--hier', type=str, default='./structure_released.xml', help='wordnet structure')
     parser.add_argument('--ckpt', type=str, default='/path/to/checkpoint', help='path of model checkpoint')
     parser.add_argument('--root', type=str, default='/path/to/dataset', help='dataset path')
-    parser.add_argument('--data', type=str, default='imagenet', help='dataset name')
+    parser.add_argument('--data', type=str, default='cifar100', help='dataset name')
     parser.add_argument('--classes', type=int, default=1000, help='number of classes')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')
@@ -63,7 +52,7 @@ if __name__ == "__main__":
     parser.add_argument('--plan', type=str, default='silhouette_score', help='cluster metrics')
     parser.add_argument('--save', type=str, default='/path/to/save', help='thought file path')
     parser.add_argument('--load', type=str, default='', help='thought file path')
-    parser.add_argument('--words', type=str, default='/path/to/words', help='words file path')
+    parser.add_argument('--words', type=str, default='/root/autodl-tmp/data/cifar-100-python/words.txt', help='words file path')
 
     args = parser.parse_args()
     main(args)

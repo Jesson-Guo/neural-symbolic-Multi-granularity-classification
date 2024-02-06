@@ -88,8 +88,8 @@ def train_one_batch(x, targets, criterion, tot, num_classes, device):
         t = thoughts.pop()
         if t.stop():
             label_id = t.tid
-            scores[:, label_id] += t.score
-            # scores[:, label_id] += x[:, label_id]
+            # scores[:, label_id] += t.score
+            scores[:, label_id] += x[:, label_id]
             outputs[:, label_id] += t.path_score
 
         label_list = list(t.labels.keys())
@@ -102,10 +102,10 @@ def train_one_batch(x, targets, criterion, tot, num_classes, device):
                     ts[j].path_score = score * t.path_score
                     thoughts.append(ts[j])
 
-                    if t.tid == -1:
-                        ts[j].score = x[:, ts[j].tid]
-                    else:
-                        ts[j].score = (x[:, ts[j].tid] + t.score) / 2
+                    # if t.tid == -1:
+                    #     ts[j].score = x[:, ts[j].tid]
+                    # else:
+                    #     ts[j].score = (x[:, ts[j].tid] + t.score) / 2
 
     leaves_cnt = torch.FloatTensor(tot.leaves_cnt).to(device)
     scores = scores / leaves_cnt

@@ -10,22 +10,11 @@ from src.tot.tot import Thought
 
 
 class ToTBuilder:
-    def __init__(self, plan_func, num_plans=2, num_coarse=100, num_k=2) -> None:
+    def __init__(self, plan_func, num_plans=2, num_coarse=10000, num_k=2) -> None:
         self.plan_func = plan_func
         self.num_plans = num_plans
         self.num_coarse = num_coarse
         self.num_k = num_k
-
-    def estimate_plans(self, plans_w):
-        result = []
-        for plan_w in plans_w:
-            out = self.plan_func(plan_w)
-            # out是2/1/0表示sure/likely/impossible，后续也可以比较启发式和最优的差别
-            # 这里也可以考虑将index传给gpt让gpt评价（可尝试）
-            result.append(out)
-        # 选择最好的（最大的），如果有些指标是越小越好需要先处理
-        # idx = np.array(result).argmax()
-        return result
 
     def build_on_tree(self, labels, tree, node_children):
         root = Thought(labels, name=['Thing'])
@@ -44,7 +33,7 @@ class ToTBuilder:
         plans_t = copy.deepcopy(plans)
         for i in range(len(plans)):
             label_set = set()
-            for l in labels.values():
+            for l in labels.keys():
                 label_set.add(l)
             plan = plans[i]
             names = set()
@@ -52,7 +41,7 @@ class ToTBuilder:
                 ls_set = []
                 names.add(name)
                 for j in range(len(ls)):
-                    if ls[j] in label_set():
+                    if ls[j] in label_set:
                         label_set.remove(ls[j])
                         ls_set.append(ls[j])
                 if len(ls_set):
@@ -91,7 +80,7 @@ class ToTBuilder:
                 plans_w.append(plan_w)
         return plans_w
 
-    def build_on_gpt(self, labels, weights, gpt: GPT, save_path, load_path=""):
+    def build_on_gpt(self, labels, gpt: GPT, save_path, load_path=""):
         # 需要设置中间节点的数量上限！！！！
         # 设置叶子节点，当一个thought中少雨k个时直接分类
         try:
@@ -100,7 +89,7 @@ class ToTBuilder:
             if load_path == "":
                 root = Thought(labels, 2, name='Thing')
             else:
-                root, plan_dict = self.load(load_path, labels)
+                root, _ = self.load(labels, load_path)
             thoughts = [root]
 
             while len(thoughts) and len(plan_dict) < self.num_coarse:
@@ -130,33 +119,25 @@ class ToTBuilder:
 
                     plans = gpt.gen_plans(contents)
                     plans = self.check_plans(plans, t.labels)
-                    plans_w = self.get_plans_with_weights(self, plans, weights)
 
-                    estimate = self.estimate_plans(plans_w)
-
-                    if sum(estimate) == 0:
-                        # re-generate 不考虑一直错
-                        thoughts.append(t)
-                        continue
-
-                    for j in range(len(estimate)):
+                    for j in range(len(plans)):
                         i = len(t.plans)
                         for name, ls in plans[j].items():
                             if len(ls) == 1:
-                                name = ls[0]
-                            if len(ls) < len(t.labels):
-                                l_dict = {l: labels[l] for l in ls}
-                                thought = Thought(l_dict, estimate[j], t, name)
-                                t.add_child(i, thought)
-                                thoughts.insert(0, thought)
-                        t.add_child(i, Thought({}, 0, t, "Other"))
+                                name = labels[ls[0]]
+
+                            assert len(ls) <= len(t.labels), "gpt generate error."
+                            l_dict = {l: labels[l] for l in ls}
+                            thought = Thought(l_dict, 2, t, name)
+                            t.add_child(i, thought)
+                            thoughts.insert(0, thought)
 
                     plan_dict[label_str] = t.plans
                 else:
                     if t.feedback != 0 and len(t.labels) < len(t.parent.labels):
                         t.plans = plan_dict[label_str]
                 if cnt % 10 == 0:
-                    self.save(save_path)
+                    self.save(root, save_path)
             self.save(root, save_path)
             print(len(plan_dict))
             return root
