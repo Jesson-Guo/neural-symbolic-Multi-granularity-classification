@@ -5,9 +5,9 @@ python main.py \
         --method tot \
         --k 2 \
         --data cifar10 \
-        --words /root/autodl-tmp/data/cifar-10-batches-py/words.txt \
+        --words /mnt/data/ztl/mycode/data/cifar-10-batches-py/words.txt \
         --config ./src/vpt/configs/files/simple/cifar10.yaml \
-        --tree ./tots/no_other/cifar10-2.json \
+        --tree ./tots/cifar10-2.json \
         --train \
         --naive \
         --pretrained \

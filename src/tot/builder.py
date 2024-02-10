@@ -10,21 +10,22 @@ from src.tot.tot import Thought
 
 
 class ToTBuilder:
-    def __init__(self, plan_func, num_plans=2, num_coarse=10000, num_k=2) -> None:
+    def __init__(self, plan_func, num_plans=2, num_coarse=10000, num_k=2, max_depth=3) -> None:
         self.plan_func = plan_func
         self.num_plans = num_plans
         self.num_coarse = num_coarse
         self.num_k = num_k
+        self.max_depth = max_depth
 
     def build_on_tree(self, labels, tree, node_children):
-        root = Thought(labels, name=['Thing'])
+        root = Thought(labels, name=['Thing'], layer=0)
         thoughts = [(root, tree)]
         while len(thoughts):
             t, node = thoughts.pop()
             for node_child in node.children.values():
                 name_t = copy.deepcopy(t.name)
                 name_t.append(node_child.name)
-                t_child = Thought(node_children[node_child.wnid], 2, t, name_t)
+                t_child = Thought(node_children[node_child.wnid], 2, t, name_t, layer=t.layer+1)
                 t.add_child(0, t_child)
                 thoughts.insert(0, (t_child, node_child))
         return root
@@ -87,7 +88,7 @@ class ToTBuilder:
             cnt = 0
             plan_dict = {}
             if load_path == "":
-                root = Thought(labels, 2, name='Thing')
+                root = Thought(labels, 2, name='Thing', layer=0)
             else:
                 root, _ = self.load(labels, load_path)
             thoughts = [root]
@@ -100,9 +101,9 @@ class ToTBuilder:
 
                 if (not t.is_valid()) or t.stop():
                     continue
-                if len(t.labels) <= self.num_k and len(t.plans) == 0:
+                if (len(t.labels) <= self.num_k or t.layer == self.max_depth-1) and len(t.plans) == 0:
                     for k, v in t.labels.items():
-                        thought = Thought({k: v}, 2, t, v)
+                        thought = Thought({k: v}, 2, t, v, t.layer+1)
                         t.add_child(0, thought)
                     plan_dict[label_str] = t.plans
                     continue
@@ -128,7 +129,7 @@ class ToTBuilder:
 
                             assert len(ls) <= len(t.labels), "gpt generate error."
                             l_dict = {l: labels[l] for l in ls}
-                            thought = Thought(l_dict, 2, t, name)
+                            thought = Thought(l_dict, 2, t, name, t.layer+1)
                             t.add_child(i, thought)
                             thoughts.insert(0, thought)
 
@@ -178,7 +179,8 @@ class ToTBuilder:
             label_dict = {l: labels[l] for l in label_list}
 
             label_str = str(label_list)[1:-1]
-            t = Thought(labels=label_dict, feedback=t_dict["feedback"], parent=None, name=t_dict["name"])
+            # t = Thought(labels=label_dict, feedback=t_dict["feedback"], parent=None, name=t_dict["name"])
+            t = Thought(labels=label_dict, feedback=t_dict["feedback"], parent=None, name=t_dict["name"], layer=t_dict["layer"])
             if len(label_dict) == 1:
                 return t
             if "plans" not in t_dict:
@@ -195,6 +197,7 @@ class ToTBuilder:
             return t
 
         plan_dict = {}
+        tid = {"tid": -1}
         f = open(load_path, 'r')
         tot_data = json.load(f)
         root = load_child(tot_data)

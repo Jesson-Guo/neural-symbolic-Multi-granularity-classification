@@ -2,7 +2,7 @@ _BASE_: "../base-prompt.yaml"
 NUM_GPUS: 4
 DATA:
   NAME: "cifar10"
-  ROOT: "/root/autodl-tmp/data"
+  ROOT: "/mnt/data/ztl/mycode/data"
   NUMBER_CLASSES: 10
   BATCH_SIZE: 64
   FEATURE: "sup_vitb16_imagenet21k"

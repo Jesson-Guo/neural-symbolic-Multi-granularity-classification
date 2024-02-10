@@ -6,7 +6,7 @@ python main.py \
         --method vit \
         --k 10 \
         --data cifar100-lt \
-        --words /root/autodl-tmp/data/cifar-100-python/words.txt \
+        --words /mnt/data/ztl/mycode/data/cifar-100-python/words.txt \
         --config ./src/vpt/configs/files/simple/cifar100-lt.yaml \
         --train \
         --naive \

@@ -7,9 +7,9 @@ python -m torch.distributed.launch --nproc_per_node=4 --master_port 29504 \
         --method tot \
         --k 10 \
         --data cifar100 \
-        --words /root/autodl-tmp/data/cifar-100-python/words.txt \
+        --words /mnt/data/ztl/mycode/data/cifar-100-python/words.txt \
         --config ./src/vpt/configs/files/simple/cifar100.yaml \
-        --tree ./tots/no_other/temp.json \
+        --tree ./tots/temp.json \
         --loss ldam \
         --train \
         --pretrained \

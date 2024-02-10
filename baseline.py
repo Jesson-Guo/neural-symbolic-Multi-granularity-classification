@@ -83,7 +83,7 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=72, help='random seed')
     parser.add_argument('--model', type=str, default='vit_base_patch16_224.orig_in21k_ft_in1k', help='model name')
     parser.add_argument('--ckpt', type=str, default='./weights/jx_vit_base_p16_224-80ecf9dd.pth', help='path of model checkpoint')
-    parser.add_argument('--root', type=str, default='/root/autodl-tmp/data', help='dataset path')
+    parser.add_argument('--root', type=str, default='/mnt/data/ztl/mycode/data', help='dataset path')
     parser.add_argument('--data', type=str, default='cifar100', help='dataset name')
     parser.add_argument('-j', '--workers', type=int, default=4, help='number of data loading workers (default: 4)')
     parser.add_argument('--batch_size', type=int, default=64, help='batch size')

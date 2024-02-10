@@ -18,12 +18,13 @@ STATUS = {
 
 
 class Thought(object):
-    def __init__(self, labels, feedback=2, parent=None, name="") -> None:
+    def __init__(self, labels, feedback=2, parent=None, name="", layer=0) -> None:
         self.labels = labels
         self.feedback = feedback
         self.parent = parent
         self.plans = {}
         self.name = name
+        self.layer = layer
 
         self.tid = -1
         self.score = None
@@ -45,7 +46,7 @@ class Thought(object):
 
     def to_dict(self):
         label_list = [k for k in self.labels.keys()]
-        return {"feedback": self.feedback, "labels": str(label_list), "name": self.name, "plans": {}}
+        return {"tid": self.tid, "feedback": self.feedback, "labels": str(label_list), "name": self.name, "layer": self.layer, "plans": {}}
 
 
 class ToT:

@@ -2,7 +2,7 @@ _BASE_: "../base-prompt.yaml"
 NUM_GPUS: 2
 DATA:
   NAME: "cifar100"
-  ROOT: "/root/autodl-tmp/data"
+  ROOT: "/mnt/data/ztl/mycode/data"
   NUMBER_CLASSES: 100
   MULTILABEL: False
   BATCH_SIZE: 64

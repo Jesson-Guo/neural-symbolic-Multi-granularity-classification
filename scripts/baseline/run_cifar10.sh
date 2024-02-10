@@ -5,6 +5,6 @@ python main.py \
         --method vit \
         --k 2 \
         --data cifar10 \
-        --words /root/autodl-tmp/data/cifar-10-batches-py/words.txt \
+        --words /mnt/data/ztl/mycode/data/cifar-10-batches-py/words.txt \
         --train \
         --naive

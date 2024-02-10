@@ -60,6 +60,7 @@ def compute_penalty(x, targets, criterion, tot):
                 coarse_out = coarse_x.softmax(dim=1)
                 coarse_targets = torch.LongTensor(coarse_targets).to(targets.device)
                 if cache["do_loss"]:
+                    # penalty += criterion(coarse_x, coarse_targets)
                     penalty += criterion(coarse_x, coarse_targets, cache["samples_per_cls"], num_classes=len(cache["tids"]))
                     if torch.isnan(penalty).any():
                         print("Nan error occurs, please check the values computing loss")
@@ -128,10 +129,11 @@ def train(cfg, tot, model, criterion, optimizer, scheduler, train_loader, val_lo
     save_file = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}_{cfg.loss}.pth")
     save_best = os.path.join(cfg.OUTPUT_DIR, f"{cfg.METHOD}_{cfg.DATA.NAME}-{cfg.K}_{cfg.loss}_best.pth")
 
-    if not cfg.DATA.NAME.endswith("lt"):
-        leaf_criterion = nn.CrossEntropyLoss()
-    else:
-        leaf_criterion = criterion
+    # if not cfg.DATA.NAME.endswith("lt"):
+    #     leaf_criterion = nn.CrossEntropyLoss()
+    # else:
+    #     leaf_criterion = criterion
+    leaf_criterion = criterion
 
     for epoch in range(cfg.start_epoch, total_epoch):
         wrong_acc = torch.zeros(num_classes).to(device)

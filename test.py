@@ -69,7 +69,7 @@ def main(args):
         sim_func = getattr(metrics, args.sim)
         plan_func = getattr(metrics, args.plan)
         builder = ToTBuilder(plan_func, num_plans=2, num_coarse=10000, num_k=5)
-        root, plan_dict = builder.load(labels, f"./tots/no_other/{cfg.DATA.NAME}-{cfg.K}.json")
+        root, plan_dict = builder.load(labels, f"./tots/{cfg.DATA.NAME}-{cfg.K}.json")
         tot = ToT(cfg.DATA.NUMBER_CLASSES, sim_func, plan_dict, root)
         tot.reset()
 
